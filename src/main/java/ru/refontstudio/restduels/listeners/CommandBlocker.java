@@ -182,7 +182,7 @@ public class CommandBlocker implements Listener {
 
             // Если команда не разрешена, блокируем её
             if (!allowed) {
-                // Отменяем событие
+                // Отменяем событи
                 event.setCancelled(true);
 
                 // Отправляем сообщение игроку

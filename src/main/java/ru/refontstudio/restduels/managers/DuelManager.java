@@ -13,6 +13,7 @@ import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.scheduler.BukkitTask;
 import ru.refontstudio.restduels.RestDuels;
+import ru.refontstudio.restduels.listeners.CommandBlocker;
 import ru.refontstudio.restduels.models.Arena;
 import ru.refontstudio.restduels.models.Duel;
 import ru.refontstudio.restduels.models.DuelType;
@@ -1876,6 +1877,48 @@ public class DuelManager {
         return null;
     }
 
+    /**
+     * Разблокирует команды для игрока через CommandBlocker
+     * @param playerId UUID игрока
+     */
+    private void unblockCommandsForPlayer(UUID playerId) {
+        try {
+            // Получаем экземпляр CommandBlocker через RestDuels
+            CommandBlocker commandBlocker = plugin.getCommandBlocker();
+            if (commandBlocker != null) {
+                // Пробуем найти метод removePlayer через рефлексию
+                java.lang.reflect.Method removePlayerMethod = commandBlocker.getClass().getMethod("removePlayer", UUID.class);
+                if (removePlayerMethod != null) {
+                    removePlayerMethod.invoke(commandBlocker, playerId);
+
+                    if (plugin.getConfig().getBoolean("debug", false)) {
+                        plugin.getLogger().info("Команды разблокированы для игрока " + playerId);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // Если что-то пошло не так, пробуем через рефлексию
+            try {
+                Class<?> commandBlockerClass = Class.forName("ru.refontstudio.restduels.listeners.CommandBlocker");
+                if (commandBlockerClass != null) {
+                    java.lang.reflect.Method getInstanceMethod = commandBlockerClass.getMethod("getInstance");
+                    if (getInstanceMethod != null) {
+                        Object commandBlocker = getInstanceMethod.invoke(null);
+                        java.lang.reflect.Method removePlayerMethod = commandBlocker.getClass().getMethod("removePlayer", UUID.class);
+                        if (removePlayerMethod != null) {
+                            removePlayerMethod.invoke(commandBlocker, playerId);
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                // Игнорируем ошибки, если класс или методы не найдены
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().warning("Не удалось разблокировать команды для игрока " + playerId + ": " + ex.getMessage());
+                }
+            }
+        }
+    }
+
     public void endDuel(Duel duel, UUID winnerId, boolean isDraw) {
         // Отменяем таймер дуэли
         if (duel.getDuelTask() != null) {
@@ -1896,6 +1939,10 @@ public class DuelManager {
         // Обрабатываем игроков и статистику
         Player player1 = Bukkit.getPlayer(duel.getPlayer1Id());
         Player player2 = Bukkit.getPlayer(duel.getPlayer2Id());
+
+        // ДОБАВЛЕНО: Сразу удаляем дуэль из списка активных для обоих игроков
+        playerDuels.remove(duel.getPlayer1Id());
+        playerDuels.remove(duel.getPlayer2Id());
 
         // Определяем победителя и проигравшего
         final Player winner;
@@ -1933,16 +1980,9 @@ public class DuelManager {
 
                 // Если есть CommandBlocker, разблокируем команды
                 try {
-                    Class<?> commandBlockerClass = Class.forName("ru.refontstudio.restduels.utils.CommandBlocker");
-                    if (commandBlockerClass != null) {
-                        java.lang.reflect.Method getInstanceMethod = commandBlockerClass.getMethod("getInstance");
-                        if (getInstanceMethod != null) {
-                            Object commandBlocker = getInstanceMethod.invoke(null);
-                            java.lang.reflect.Method removePlayerMethod = commandBlocker.getClass().getMethod("removePlayer", UUID.class);
-                            if (removePlayerMethod != null) {
-                                removePlayerMethod.invoke(commandBlocker, player1.getUniqueId());
-                            }
-                        }
+                    CommandBlocker commandBlocker = plugin.getCommandBlocker();
+                    if (commandBlocker != null) {
+                        commandBlocker.removePlayer(player1.getUniqueId());
                     }
                 } catch (Exception e) {
                     // Игнорируем ошибки, если класс или методы не найдены
@@ -1966,16 +2006,9 @@ public class DuelManager {
 
                 // Если есть CommandBlocker, разблокируем команды
                 try {
-                    Class<?> commandBlockerClass = Class.forName("ru.refontstudio.restduels.utils.CommandBlocker");
-                    if (commandBlockerClass != null) {
-                        java.lang.reflect.Method getInstanceMethod = commandBlockerClass.getMethod("getInstance");
-                        if (getInstanceMethod != null) {
-                            Object commandBlocker = getInstanceMethod.invoke(null);
-                            java.lang.reflect.Method removePlayerMethod = commandBlocker.getClass().getMethod("removePlayer", UUID.class);
-                            if (removePlayerMethod != null) {
-                                removePlayerMethod.invoke(commandBlocker, player2.getUniqueId());
-                            }
-                        }
+                    CommandBlocker commandBlocker = plugin.getCommandBlocker();
+                    if (commandBlocker != null) {
+                        commandBlocker.removePlayer(player2.getUniqueId());
                     }
                 } catch (Exception e) {
                     // Игнорируем ошибки, если класс или методы не найдены
@@ -2001,16 +2034,9 @@ public class DuelManager {
 
                 // Если есть CommandBlocker, разблокируем команды
                 try {
-                    Class<?> commandBlockerClass = Class.forName("ru.refontstudio.restduels.utils.CommandBlocker");
-                    if (commandBlockerClass != null) {
-                        java.lang.reflect.Method getInstanceMethod = commandBlockerClass.getMethod("getInstance");
-                        if (getInstanceMethod != null) {
-                            Object commandBlocker = getInstanceMethod.invoke(null);
-                            java.lang.reflect.Method removePlayerMethod = commandBlocker.getClass().getMethod("removePlayer", UUID.class);
-                            if (removePlayerMethod != null) {
-                                removePlayerMethod.invoke(commandBlocker, player1.getUniqueId());
-                            }
-                        }
+                    CommandBlocker commandBlocker = plugin.getCommandBlocker();
+                    if (commandBlocker != null) {
+                        commandBlocker.removePlayer(player1.getUniqueId());
                     }
                 } catch (Exception e) {
                     // Игнорируем ошибки, если класс или методы не найдены
@@ -2031,16 +2057,9 @@ public class DuelManager {
 
                 // Если есть CommandBlocker, разблокируем команды
                 try {
-                    Class<?> commandBlockerClass = Class.forName("ru.refontstudio.restduels.utils.CommandBlocker");
-                    if (commandBlockerClass != null) {
-                        java.lang.reflect.Method getInstanceMethod = commandBlockerClass.getMethod("getInstance");
-                        if (getInstanceMethod != null) {
-                            Object commandBlocker = getInstanceMethod.invoke(null);
-                            java.lang.reflect.Method removePlayerMethod = commandBlocker.getClass().getMethod("removePlayer", UUID.class);
-                            if (removePlayerMethod != null) {
-                                removePlayerMethod.invoke(commandBlocker, player2.getUniqueId());
-                            }
-                        }
+                    CommandBlocker commandBlocker = plugin.getCommandBlocker();
+                    if (commandBlocker != null) {
+                        commandBlocker.removePlayer(player2.getUniqueId());
                     }
                 } catch (Exception e) {
                     // Игнорируем ошибки, если класс или методы не найдены
@@ -2077,10 +2096,6 @@ public class DuelManager {
                 // Принудительное восстановление через команду
                 forceRestoreArena(arena.getId());
             }
-
-            // Удаляем дуэль из списка
-            playerDuels.remove(duel.getPlayer1Id());
-            playerDuels.remove(duel.getPlayer2Id());
         } else {
             // В обычном режиме NORMAL
             if (isDraw) {
@@ -2120,10 +2135,6 @@ public class DuelManager {
                         forceRestoreArena(arena.getId());
                     }
 
-                    // Удаляем дуэль из списка
-                    playerDuels.remove(duel.getPlayer1Id());
-                    playerDuels.remove(duel.getPlayer2Id());
-
                     // Удаляем задачи из списка
                     delayedReturnTasks.remove(duel.getPlayer1Id());
                     delayedReturnTasks.remove(duel.getPlayer2Id());
@@ -2151,9 +2162,6 @@ public class DuelManager {
                     loser.sendMessage(ColorUtils.colorize(
                             plugin.getConfig().getString("messages.prefix") +
                                     "&cВы проиграли и были возвращены на исходную позицию."));
-
-                    // Удаляем дуэль для проигравшего
-                    playerDuels.remove(loser.getUniqueId());
                 }
 
                 if (winner != null && winner.isOnline()) {
@@ -2223,8 +2231,7 @@ public class DuelManager {
                             forceRestoreArena(arena.getId());
                         }
 
-                        // Удаляем дуэль и задачу
-                        playerDuels.remove(winnerUUID);
+                        // Удаляем задачу
                         delayedReturnTasks.remove(winnerUUID);
                     }, 60 * 20L); // 60 секунд
 
@@ -3025,6 +3032,10 @@ public class DuelManager {
         }
     }
 
+    /**
+     * Останавливает все активные дуэли и возвращает игроков
+     * Используется при перезагрузке/выключении сервера
+     */
     public void stopAllDuels() {
         // Завершаем все активные дуэли и восстанавливаем инвентарь
         for (Duel duel : new ArrayList<>(playerDuels.values())) {
@@ -3042,8 +3053,35 @@ public class DuelManager {
                 duel.getDuelTask().cancel();
             }
 
+            // Отменяем таймер отображения
+            if (duel.getTimerTask() != null) {
+                duel.getTimerTask().cancel();
+            }
+
             // Восстанавливаем инвентарь и возвращаем игроков
             if (player1 != null && player1.isOnline()) {
+                // ДОБАВЛЕНО: Разблокируем команды для игрока 1
+                if (player1.hasMetadata("restduels_blocked_commands")) {
+                    player1.removeMetadata("restduels_blocked_commands", plugin);
+                }
+
+                // Если есть CommandBlocker, разблокируем команды
+                try {
+                    Class<?> commandBlockerClass = Class.forName("ru.refontstudio.restduels.listeners.CommandBlocker");
+                    if (commandBlockerClass != null) {
+                        java.lang.reflect.Method getInstanceMethod = commandBlockerClass.getMethod("getInstance");
+                        if (getInstanceMethod != null) {
+                            Object commandBlocker = getInstanceMethod.invoke(null);
+                            java.lang.reflect.Method removePlayerMethod = commandBlocker.getClass().getMethod("removePlayer", UUID.class);
+                            if (removePlayerMethod != null) {
+                                removePlayerMethod.invoke(commandBlocker, player1.getUniqueId());
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    // Игнорируем ошибки, если класс или методы не найдены
+                }
+
                 restorePlayerInventory(player1);
                 if (playerLocations.containsKey(player1.getUniqueId())) {
                     safeTeleport(player1, playerLocations.get(player1.getUniqueId()));
@@ -3055,6 +3093,28 @@ public class DuelManager {
             }
 
             if (player2 != null && player2.isOnline()) {
+                // ДОБАВЛЕНО: Разблокируем команды для игрока 2
+                if (player2.hasMetadata("restduels_blocked_commands")) {
+                    player2.removeMetadata("restduels_blocked_commands", plugin);
+                }
+
+                // Если есть CommandBlocker, разблокируем команды
+                try {
+                    Class<?> commandBlockerClass = Class.forName("ru.refontstudio.restduels.listeners.CommandBlocker");
+                    if (commandBlockerClass != null) {
+                        java.lang.reflect.Method getInstanceMethod = commandBlockerClass.getMethod("getInstance");
+                        if (getInstanceMethod != null) {
+                            Object commandBlocker = getInstanceMethod.invoke(null);
+                            java.lang.reflect.Method removePlayerMethod = commandBlocker.getClass().getMethod("removePlayer", UUID.class);
+                            if (removePlayerMethod != null) {
+                                removePlayerMethod.invoke(commandBlocker, player2.getUniqueId());
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    // Игнорируем ошибки, если класс или методы не найдены
+                }
+
                 restorePlayerInventory(player2);
                 if (playerLocations.containsKey(player2.getUniqueId())) {
                     safeTeleport(player2, playerLocations.get(player2.getUniqueId()));
@@ -3084,11 +3144,33 @@ public class DuelManager {
         }
         flightCheckTasks.clear();
 
-        // Восстанавливаем игроков из очередей
+        // Восстанавливаем игроков из очередей и разблокируем команды
         for (DuelType type : DuelType.values()) {
             for (UUID playerId : queuedPlayers.get(type)) {
                 Player player = Bukkit.getPlayer(playerId);
                 if (player != null && player.isOnline()) {
+                    // ДОБАВЛЕНО: Разблокируем команды
+                    if (player.hasMetadata("restduels_blocked_commands")) {
+                        player.removeMetadata("restduels_blocked_commands", plugin);
+                    }
+
+                    // Если есть CommandBlocker, разблокируем команды
+                    try {
+                        Class<?> commandBlockerClass = Class.forName("ru.refontstudio.restduels.listeners.CommandBlocker");
+                        if (commandBlockerClass != null) {
+                            java.lang.reflect.Method getInstanceMethod = commandBlockerClass.getMethod("getInstance");
+                            if (getInstanceMethod != null) {
+                                Object commandBlocker = getInstanceMethod.invoke(null);
+                                java.lang.reflect.Method removePlayerMethod = commandBlocker.getClass().getMethod("removePlayer", UUID.class);
+                                if (removePlayerMethod != null) {
+                                    removePlayerMethod.invoke(commandBlocker, playerId);
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        // Игнорируем ош��бки, если класс или методы не найдены
+                    }
+
                     restorePlayerInventory(player);
                     if (playerLocations.containsKey(playerId)) {
                         safeTeleport(player, playerLocations.get(playerId));
@@ -3107,6 +3189,28 @@ public class DuelManager {
             // Игрок 1
             Player player1 = Bukkit.getPlayer(entry.player1Id);
             if (player1 != null && player1.isOnline()) {
+                // ДОБАВЛЕНО: Разблокируем команды
+                if (player1.hasMetadata("restduels_blocked_commands")) {
+                    player1.removeMetadata("restduels_blocked_commands", plugin);
+                }
+
+                // Если есть CommandBlocker, разблокируем команды
+                try {
+                    Class<?> commandBlockerClass = Class.forName("ru.refontstudio.restduels.listeners.CommandBlocker");
+                    if (commandBlockerClass != null) {
+                        java.lang.reflect.Method getInstanceMethod = commandBlockerClass.getMethod("getInstance");
+                        if (getInstanceMethod != null) {
+                            Object commandBlocker = getInstanceMethod.invoke(null);
+                            java.lang.reflect.Method removePlayerMethod = commandBlocker.getClass().getMethod("removePlayer", UUID.class);
+                            if (removePlayerMethod != null) {
+                                removePlayerMethod.invoke(commandBlocker, entry.player1Id);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    // Игнорируем ошибки, если класс или методы не найдены
+                }
+
                 restorePlayerInventory(player1);
                 if (playerLocations.containsKey(entry.player1Id)) {
                     safeTeleport(player1, playerLocations.get(entry.player1Id));
@@ -3120,6 +3224,28 @@ public class DuelManager {
             // Игрок 2
             Player player2 = Bukkit.getPlayer(entry.player2Id);
             if (player2 != null && player2.isOnline()) {
+                // ДОБАВЛЕНО: Разблокируем команды
+                if (player2.hasMetadata("restduels_blocked_commands")) {
+                    player2.removeMetadata("restduels_blocked_commands", plugin);
+                }
+
+                // Если есть CommandBlocker, разблокируем команды
+                try {
+                    Class<?> commandBlockerClass = Class.forName("ru.refontstudio.restduels.listeners.CommandBlocker");
+                    if (commandBlockerClass != null) {
+                        java.lang.reflect.Method getInstanceMethod = commandBlockerClass.getMethod("getInstance");
+                        if (getInstanceMethod != null) {
+                            Object commandBlocker = getInstanceMethod.invoke(null);
+                            java.lang.reflect.Method removePlayerMethod = commandBlocker.getClass().getMethod("removePlayer", UUID.class);
+                            if (removePlayerMethod != null) {
+                                removePlayerMethod.invoke(commandBlocker, entry.player2Id);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    // Игнорируем ошибки, если класс или методы не найдены
+                }
+
                 restorePlayerInventory(player2);
                 if (playerLocations.containsKey(entry.player2Id)) {
                     safeTeleport(player2, playerLocations.get(entry.player2Id));
@@ -3136,6 +3262,28 @@ public class DuelManager {
         for (UUID playerId : new HashSet<>(frozenPlayers)) {
             Player player = Bukkit.getPlayer(playerId);
             if (player != null && player.isOnline()) {
+                // ДОБАВЛЕНО: Разблокируем команды
+                if (player.hasMetadata("restduels_blocked_commands")) {
+                    player.removeMetadata("restduels_blocked_commands", plugin);
+                }
+
+                // Если есть CommandBlocker, разблокируем команды
+                try {
+                    Class<?> commandBlockerClass = Class.forName("ru.refontstudio.restduels.listeners.CommandBlocker");
+                    if (commandBlockerClass != null) {
+                        java.lang.reflect.Method getInstanceMethod = commandBlockerClass.getMethod("getInstance");
+                        if (getInstanceMethod != null) {
+                            Object commandBlocker = getInstanceMethod.invoke(null);
+                            java.lang.reflect.Method removePlayerMethod = commandBlocker.getClass().getMethod("removePlayer", UUID.class);
+                            if (removePlayerMethod != null) {
+                                removePlayerMethod.invoke(commandBlocker, playerId);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    // Игнорируем ошибки, если класс или методы не найдены
+                }
+
                 restorePlayerInventory(player);
                 if (playerLocations.containsKey(playerId)) {
                     safeTeleport(player, playerLocations.get(playerId));
@@ -3160,9 +3308,42 @@ public class DuelManager {
         playerFlightStatus.clear();
         originalInventories.clear();
         originalArmor.clear();
+
+        // ДОБАВЛЕНО: Попытка очистить CommandBlocker
+        try {
+            Class<?> commandBlockerClass = Class.forName("ru.refontstudio.restduels.listeners.CommandBlocker");
+            if (commandBlockerClass != null) {
+                // Проверяем наличие метода clearAllPlayers
+                try {
+                    java.lang.reflect.Method clearMethod = commandBlockerClass.getMethod("clearAllPlayers");
+                    if (clearMethod != null) {
+                        java.lang.reflect.Method getInstanceMethod = commandBlockerClass.getMethod("getInstance");
+                        Object commandBlocker = getInstanceMethod.invoke(null);
+                        clearMethod.invoke(commandBlocker);
+                    }
+                } catch (NoSuchMethodException e) {
+                    // Если метода нет, просто пропускаем
+                    plugin.getLogger().info("Метод clearAllPlayers не найден в CommandBlocker");
+                }
+            }
+        } catch (Exception e) {
+            // Игнорируем ошибки, если класс не найден
+        }
     }
 
+    /**
+     * Проверяет, находится ли игрок в активной дуэли
+     * @param playerId UUID игрока
+     * @return true, если игрок в активной дуэли
+     */
     public boolean isPlayerInDuel(UUID playerId) {
+        // ИЗМЕНЕНО: Добавлена проверка на наличие отложенной задачи возврата
+        // Если у игрока есть отложенная задача возврата, то дуэль уже завершена
+        // и он не считается находящимся в активной дуэли
+        if (delayedReturnTasks.containsKey(playerId)) {
+            return false;
+        }
+
         return playerDuels.containsKey(playerId);
     }
 

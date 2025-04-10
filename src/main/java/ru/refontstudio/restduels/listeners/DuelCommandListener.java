@@ -64,7 +64,7 @@ public class DuelCommandListener implements Listener {
         messageThrottling.clear();
     }
 
-    @EventHandler(priority = EventPriority.LOWEST) // Самый высокий приоритет для перехвата
+    @EventHandler(priority = EventPriority.LOWEST)
     public void onPlayerCommand(PlayerCommandPreprocessEvent event) {
         if (event.isCancelled()) {
             return; // Уже отменено другим плагином
@@ -72,6 +72,12 @@ public class DuelCommandListener implements Listener {
 
         Player player = event.getPlayer();
         UUID playerId = player.getUniqueId();
+
+        // ДОБАВЛЕНО: Если у игрока есть отложенная задача возврата,
+        // значит дуэль уже завершена и он собирает ресурсы - разрешаем команды
+        if (plugin.getDuelManager().hasDelayedReturnTask(playerId)) {
+            return; // Разрешаем команду
+        }
 
         // Проверяем, участвует ли игрок в дуэли
         if (!plugin.getDuelManager().isPlayerInDuel(playerId)) {
@@ -116,8 +122,8 @@ public class DuelCommandListener implements Listener {
         if (isExplicitlyBlocked || !isAllowed) {
             event.setCancelled(true);
 
-            // Отправляем сообщение о блокировке, но не чаще чем раз в 2 секунды
-            if (!messageThrottling.contains(playerId)) {
+            // ИЗМЕНЕНО: Проверяем, активна ли дуэль, и только тогда отправляем сообщение
+            if (!messageThrottling.contains(playerId) && plugin.getDuelManager().isPlayerInDuel(playerId)) {
                 messageThrottling.add(playerId);
 
                 String blockMessage = plugin.getConfig().getString("messages.commands-blocked",

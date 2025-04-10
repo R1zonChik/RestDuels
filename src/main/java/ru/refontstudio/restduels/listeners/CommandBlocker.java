@@ -13,14 +13,22 @@ import ru.refontstudio.restduels.RestDuels;
 import ru.refontstudio.restduels.utils.ColorUtils;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class CommandBlocker implements Listener {
     private final RestDuels plugin;
     private final Set<String> allowedCommands = new HashSet<>();
     private boolean protocolLibEnabled = false;
 
+    // ДОБАВЛЕНО: Статический экземпляр для доступа из других классов
+    private static CommandBlocker instance;
+
+    // ДОБАВЛЕНО: Множество игроков, для которых команды заблокированы
+    private final Set<UUID> blockedPlayers = ConcurrentHashMap.newKeySet();
+
     public CommandBlocker(RestDuels plugin) {
         this.plugin = plugin;
+        instance = this; // Сохраняем экземпляр
 
         // Загружаем разрешенные команды
         loadAllowedCommands();
@@ -42,6 +50,55 @@ public class CommandBlocker implements Listener {
 
         // Отключаем проблемные команды
         disableProblematicCommands();
+    }
+
+    /**
+     * Получает экземпляр CommandBlocker
+     * @return Экземпляр CommandBlocker
+     */
+    public static CommandBlocker getInstance() {
+        return instance;
+    }
+
+    /**
+     * Добавляет игрока в список блокированных
+     * @param playerId UUID игрока
+     */
+    public void addPlayer(UUID playerId) {
+        blockedPlayers.add(playerId);
+        if (plugin.getConfig().getBoolean("debug", false)) {
+            plugin.getLogger().info("Команды заблокированы для игрока " + playerId);
+        }
+    }
+
+    /**
+     * Удаляет игрока из списка блокированных
+     * @param playerId UUID игрока
+     */
+    public void removePlayer(UUID playerId) {
+        blockedPlayers.remove(playerId);
+        if (plugin.getConfig().getBoolean("debug", false)) {
+            plugin.getLogger().info("Команды разблокированы для игрока " + playerId);
+        }
+    }
+
+    /**
+     * Проверяет, заблокированы ли команды для игрока
+     * @param playerId UUID игрока
+     * @return true, если команды заблокированы
+     */
+    public boolean isBlocked(UUID playerId) {
+        return blockedPlayers.contains(playerId);
+    }
+
+    /**
+     * Очищает список всех заблокированных игроков
+     */
+    public void clearAllPlayers() {
+        blockedPlayers.clear();
+        if (plugin.getConfig().getBoolean("debug", false)) {
+            plugin.getLogger().info("Очищен список всех заблокированных игроков");
+        }
     }
 
     /**
@@ -155,9 +212,17 @@ public class CommandBlocker implements Listener {
         Player player = event.getPlayer();
         UUID playerId = player.getUniqueId();
 
-        // Если игрок в дуэли, проверяем команду
+        // ИЗМЕНЕНО: Добавлена проверка на наличие отложенной задачи возврата
+        // Если игрок находится в процессе сбора ресурсов после дуэли,
+        // не блокируем команды
+        if (plugin.getDuelManager().hasDelayedReturnTask(playerId)) {
+            return; // Разрешаем команду, если есть отложенная задача возврата
+        }
+
+        // Проверяем состояние игрока
         if (plugin.getDuelManager().isPlayerInDuel(playerId) ||
-                plugin.getDuelManager().isPlayerFrozen(playerId)) {
+                plugin.getDuelManager().isPlayerFrozen(playerId) ||
+                blockedPlayers.contains(playerId)) {
 
             String command = event.getMessage().toLowerCase(); // Полная команда с аргументами
 
@@ -171,7 +236,7 @@ public class CommandBlocker implements Listener {
 
             // Проверяем, является ли это командой досрочного возврата
             if (command.startsWith("/duel return") || command.equals("/duel return")) {
-                // Разрешаем команду dosrochno
+                // Разрешаем команду досрочного возврата
                 allowed = true;
             }
 
@@ -182,14 +247,14 @@ public class CommandBlocker implements Listener {
 
             // Если команда не разрешена, блокируем её
             if (!allowed) {
-                // Отменяем событи
+                // Отменяем событие
                 event.setCancelled(true);
 
                 // Отправляем сообщение игроку
                 player.sendMessage(ColorUtils.colorize(
                         plugin.getConfig().getString("messages.prefix") +
-                                "&cКоманды заблокированы во время дуэли! " +
-                                "Разрешены только команды /hub и /duel return."));
+                                plugin.getConfig().getString("messages.commands-blocked",
+                                        "&cВы не можете использовать команды во время дуэли!")));
 
                 // Логируем блокировку, если включена отладка
                 if (plugin.getConfig().getBoolean("debug", false)) {

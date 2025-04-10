@@ -1177,6 +1177,17 @@ public class DuelManager {
             }
         }
 
+        // ДОБАВЬ ЭТО: Разрешаем игроку использовать команды
+        // Если у вас есть CommandBlocker, разрешаем команды
+        if (plugin.getCommandBlocker() != null) {
+            plugin.getCommandBlocker().removePlayer(playerId);
+        }
+
+        // Если использовались метаданные для блокировки команд, удаляем их
+        if (player.hasMetadata("restduels_blocked_commands")) {
+            player.removeMetadata("restduels_blocked_commands", plugin);
+        }
+
         // Восстанавливаем статус полета
         if (playerFlightStatus.containsKey(playerId)) {
             boolean allowFlight = playerFlightStatus.get(playerId);
@@ -1613,6 +1624,15 @@ public class DuelManager {
      */
     public void saveOriginalLocation(Player player) {
         UUID playerId = player.getUniqueId();
+
+        // ДОБАВЬ ЭТУ ПРОВЕРКУ - если локация уже сохранена, не перезаписываем её
+        if (originalWorldLocations.containsKey(playerId)) {
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().info("Локация для игрока " + player.getName() +
+                        " уже сохранена, не перезаписываем.");
+            }
+            return;
+        }
 
         // Проверяем, находится ли игрок в мире дуэлей
         if (!isInDuelWorld(player)) {
@@ -2165,10 +2185,40 @@ public class DuelManager {
             playerFlightStatus.remove(playerId);
         }
 
-        // Телепортируем на исходную позицию
-        if (playerLocations.containsKey(playerId)) {
-            safeTeleport(player, playerLocations.get(playerId));
-            playerLocations.remove(playerId);
+        // ИЗМЕНИТЬ ЭТУ ЧАСТЬ - получаем оригинальную локацию (до входа в мир дуэлей)
+        Location teleportLocation = null;
+
+        // Сначала проверяем originalWorldLocations - там хранится локация ДО входа в мир дуэли
+        if (originalWorldLocations.containsKey(playerId)) {
+            teleportLocation = originalWorldLocations.get(playerId);
+            if (teleportLocation != null && teleportLocation.getWorld() != null &&
+                    !isInDuelWorld(teleportLocation.getWorld().getName())) {
+                // Используем эту локацию, если она не в мире дуэли
+                safeTeleport(player, teleportLocation);
+                player.sendMessage(ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") +
+                                "&aВы были досрочно телепортированы на исходную позицию."));
+            }
+        }
+        // Если originalWorldLocations не содержит подходящей локации, пробуем playerLocations
+        else if (playerLocations.containsKey(playerId)) {
+            teleportLocation = playerLocations.get(playerId);
+            if (teleportLocation != null && teleportLocation.getWorld() != null &&
+                    !isInDuelWorld(teleportLocation.getWorld().getName())) {
+                safeTeleport(player, teleportLocation);
+                playerLocations.remove(playerId);
+                player.sendMessage(ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") +
+                                "&aВы были досрочно телепортированы на исходную позицию."));
+            }
+        }
+
+        // Если не удалось найти подходящую локацию
+        if (teleportLocation == null || teleportLocation.getWorld() == null ||
+                isInDuelWorld(teleportLocation.getWorld().getName())) {
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "&cНе удалось найти безопасную локацию для телепортации. Пожалуйста, используйте /spawn."));
         }
 
         // Удаляем сохраненные данные инвентаря (не восстанавливаем)
@@ -2201,6 +2251,20 @@ public class DuelManager {
      * @param player Игрок для отправки
      */
     private void sendEarlyReturnButton(Player player) {
+        UUID playerId = player.getUniqueId();
+
+        // Кнопка должна появляться ТОЛЬКО в период сбора ресурсов (после дуэли)
+        // Проверяем, есть ли отложенная задача возврата
+        if (!delayedReturnTasks.containsKey(playerId)) {
+            // Если нет отложенной задачи, не показываем кнопку
+            return;
+        }
+
+        // Если игрок в активной дуэли, не показываем кнопку
+        if (isPlayerInDuel(playerId)) {
+            return;
+        }
+
         // Отправляем сообщение для досрочного возврата
         player.sendMessage(ColorUtils.colorize(
                 plugin.getConfig().getString("messages.prefix") +
@@ -2784,21 +2848,7 @@ public class DuelManager {
     }
 
     /**
-     * Получает дуэль, в которой участвует игрок
-     * @param playerId UUID игрока
-     * @return Дуэль или null, если игрок не участвует в дуэли
-     */
-    public Duel getPlayerDuel(UUID playerId) {
-        for (Duel duel : activeDuels) {
-            if (duel.getPlayer1Id().equals(playerId) || duel.getPlayer2Id().equals(playerId)) {
-                return duel;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * З��вершает дуэль и телепортирует игрока досрочно
+     * Завершает дуэль и телепортирует игрока досрочно
      * @param duel Дуэль для завершения
      * @param winnerId UUID победителя
      */
@@ -2817,22 +2867,24 @@ public class DuelManager {
         }
 
         // Если дуэль еще активна, завершаем её
-        if (activeDuels.contains(duel)) {
+        if (playerDuels.containsKey(winnerId)) {
             // Определяем проигравшего
             UUID loserId = duel.getPlayer1Id().equals(winnerId) ? duel.getPlayer2Id() : duel.getPlayer1Id();
 
             // Обновляем статистику
-            statsManager.addWin(winnerId);
-            statsManager.addDeath(loserId);
+            plugin.getStatsManager().incrementWins(winnerId);
+            plugin.getStatsManager().incrementDeaths(loserId);
 
             // Освобождаем арену
             Arena arena = duel.getArena();
-            if (arena != null) {
-                arena.setStatus(ArenaStatus.FREE);
-            }
+            // Удаляем строку с ArenaStatus, так как enum отсутствует
+            // if (arena != null) {
+            //     arena.setStatus(ArenaStatus.FREE);
+            // }
 
             // Удаляем дуэль из списка активных
-            activeDuels.remove(duel);
+            playerDuels.remove(duel.getPlayer1Id());
+            playerDuels.remove(duel.getPlayer2Id());
 
             // Удаляем связь игроков с ареной
             playerArenas.remove(winnerId);
@@ -3161,6 +3213,11 @@ public class DuelManager {
     }
 
     private void sendCancelButton(Player player) {
+        // ДОБАВЬ ЭТУ ПРОВЕРКУ - не отправляем кнопку, если игрок в активной дуэли
+        if (isPlayerInDuel(player.getUniqueId())) {
+            return;
+        }
+
         // Получаем время отмены из конфига
         int cancelTime = plugin.getConfig().getInt("timers.cancel-time", 8);
 

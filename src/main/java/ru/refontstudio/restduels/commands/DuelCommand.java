@@ -8,6 +8,8 @@ import org.bukkit.entity.Player;
 import ru.refontstudio.restduels.RestDuels;
 import ru.refontstudio.restduels.gui.DuelMenu;
 import ru.refontstudio.restduels.models.DuelType;
+import ru.refontstudio.restduels.models.Duel;
+import org.bukkit.Bukkit;
 import ru.refontstudio.restduels.models.PlayerStats;
 import ru.refontstudio.restduels.utils.ColorUtils;
 
@@ -182,42 +184,11 @@ public class DuelCommand implements CommandExecutor {
                     plugin.getConfig().getString("messages.prefix") +
                             "&aВы были досрочно телепортированы на исходную позицию."));
         } else if (plugin.getDuelManager().isPlayerInDuel(playerId)) {
-            // Проверяем, закончилась ли дуэль (противник убит)
-            Duel duel = plugin.getDuelManager().getPlayerDuel(playerId);
-            if (duel != null) {
-                // Проверяем, является ли игрок победителем (противник убит)
-                boolean isWinner = false;
-
-                // Получаем противника
-                UUID opponentId = duel.getPlayer1Id().equals(playerId) ? duel.getPlayer2Id() : duel.getPlayer1Id();
-                Player opponent = Bukkit.getPlayer(opponentId);
-
-                // Если противник офлайн или мертв, считаем игрока победителем
-                if (opponent == null || !opponent.isOnline() || opponent.isDead() ||
-                        opponent.getHealth() <= 0 || !opponent.getWorld().equals(player.getWorld())) {
-                    isWinner = true;
-                }
-
-                if (isWinner) {
-                    // Игрок победил, разрешаем досрочный возврат
-                    plugin.getDuelManager().endDuelAndTeleport(duel, playerId);
-
-                    player.sendMessage(ColorUtils.colorize(
-                            plugin.getConfig().getString("messages.prefix") +
-                                    "&aВы были досрочно телепортированы на исходную позицию."));
-                } else {
-                    // Дуэль еще активна
-                    player.sendMessage(ColorUtils.colorize(
-                            plugin.getConfig().getString("messages.prefix") +
-                                    "&cВы не можете использовать досрочный возврат во время активной дуэли! " +
-                                    "Дождитесь окончания дуэли или используйте /hub."));
-                }
-            } else {
-                // Дуэль не найдена (странная ситуация)
-                player.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                "&cНе удалось найти информацию о вашей дуэли."));
-            }
+            // Если игрок в активной дуэли, запрещаем досрочный возврат
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "&cВы не можете использовать досрочный возврат во время активной дуэли! " +
+                            "Дождитесь окончания дуэли или используйте /hub."));
         } else {
             player.sendMessage(ColorUtils.colorize(
                     plugin.getConfig().getString("messages.prefix") +

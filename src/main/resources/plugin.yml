@@ -1,0 +1,26 @@
+name: RestDuels
+version: '${project.version}'
+main: ru.refontstudio.restduels.RestDuels
+api-version: '1.16'
+depend: []
+softdepend: [ProtocolLib, PlacehodlerAPI]
+commands:
+  duel:
+    description: Команды для дуэлей
+    usage: /duel [cancel|normal|noloss|stats|top]
+    aliases: [duels]
+  arenasetup:
+    description: Настройка арен для дуэлей
+    usage: /arenasetup [create|delete|setspawn1|setspawn2|info|list|tp|reload] [id] [1|2]
+    aliases: [duelarena]
+    permission: restduels.admin
+    permission-message: У вас нет прав для использования этой команды!
+  arenawand:
+    description: Управление жезлом выделения арены и областями восстановления
+    usage: /arenawand [wand|create|list|info|delete|link|unlink|capture|restore]
+    aliases: [aw]
+
+permissions:
+  restduels.admin:
+    description: Доступ к командам администрирования дуэлей
+    default: op

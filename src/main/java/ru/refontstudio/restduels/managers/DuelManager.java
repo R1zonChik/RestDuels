@@ -1140,6 +1140,17 @@ public class DuelManager {
         player1.sendMessage(confirmMessage);
         player2.sendMessage(confirmMessage);
 
+        // Отменяем отложенные задачи возврата, если они есть
+        if (delayedReturnTasks.containsKey(player1.getUniqueId())) {
+            delayedReturnTasks.get(player1.getUniqueId()).cancel();
+            delayedReturnTasks.remove(player1.getUniqueId());
+        }
+
+        if (delayedReturnTasks.containsKey(player2.getUniqueId())) {
+            delayedReturnTasks.get(player2.getUniqueId()).cancel();
+            delayedReturnTasks.remove(player2.getUniqueId());
+        }
+
         // Отправляем кнопку отмены
         sendCancelButton(player1);
         sendCancelButton(player2);
@@ -2128,6 +2139,16 @@ public class DuelManager {
                         }
                     }
 
+                    if (player2 != null && player2.isOnline()) {
+                        // Проверяем, находится ли игрок все еще в мире дуэлей
+                        if (isInDuelWorld(player2)) {
+                            returnPlayer(player2, false);
+                            player2.sendMessage(ColorUtils.colorize(
+                                    plugin.getConfig().getString("messages.prefix") +
+                                            "&aВремя сбора ресурсов истекло. Вы были телепортированы на исходную позицию."));
+                        }
+                    }
+
                     // Логируем количество построенных блоков для статистики
                     int placedBlocksCount = duel.getPlayerPlacedBlocks().size();
                     if (placedBlocksCount > 0) {
@@ -2180,6 +2201,7 @@ public class DuelManager {
                     BukkitTask winnerTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
                         Player winnerPlayer = Bukkit.getPlayer(winnerUUID);
                         if (winnerPlayer != null && winnerPlayer.isOnline()) {
+                            // Проверяем, находится ли победитель все еще в мире дуэлей
                             if (isInDuelWorld(winnerPlayer)) {
                                 // Возвращаем победителя, НО сохраняем текущий инвентарь (не восстанавливаем)
                                 // Очищаем только сохраненные данные и телепортируем обратно
@@ -2297,6 +2319,11 @@ public class DuelManager {
         if (delayedReturnTasks.containsKey(playerId)) {
             delayedReturnTasks.get(playerId).cancel();
             delayedReturnTasks.remove(playerId);
+
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().info("Отменена задача отложенного возврата для игрока " + player.getName() +
+                        " при входе в новую дуэль.");
+            }
         }
 
         // Удаляем игрока из списка замороженных

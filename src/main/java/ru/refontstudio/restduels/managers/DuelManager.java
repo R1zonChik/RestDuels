@@ -54,6 +54,7 @@ public class DuelManager {
     private final Set<String> occupiedArenas = Collections.newSetFromMap(new ConcurrentHashMap<>()); // Потокобезопасная коллекция
     private final Queue<QueueEntry> arenaQueue = new LinkedList<>(); // Очередь игроков, ожидающих арену
     private final Map<UUID, Long> lastTeleportTime = new HashMap<>();
+    private final Map<UUID, Long> lastTeleportMessageTime = new HashMap<>();
     private final Set<UUID> pendingTeleports = new HashSet<>();
     private final Map<String, Long> arenaLastUsedTime = new HashMap<>(); // Для отслеживания времени последнего использования арены
     private final Map<String, Integer> worldPlayerCount = new HashMap<>(); // Для отслеживания количества игроков в мирах

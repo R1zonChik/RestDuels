@@ -2310,15 +2310,16 @@ public class DuelManager {
         // ИЗМЕНЕНО: Используем originalWorldLocations вместо playerLocations
         Location teleportLocation = null;
 
+        // Переменная для отслеживания успешности телепортации
+        boolean teleportSuccessful = false;
+
         // Сначала проверяем originalWorldLocations - там хранится локация ДО входа в мир дуэли
         if (originalWorldLocations.containsKey(playerId)) {
             teleportLocation = originalWorldLocations.get(playerId);
             if (teleportLocation != null && teleportLocation.getWorld() != null &&
                     !isInDuelWorld(teleportLocation.getWorld().getName())) {
                 safeTeleport(player, teleportLocation);
-                player.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                "&aВы были досрочно телепортированы на исходную позицию."));
+                teleportSuccessful = true;
             }
         }
         // Если originalWorldLocations не содержит подходящей локации, пробуем playerLocations
@@ -2328,15 +2329,16 @@ public class DuelManager {
                     !isInDuelWorld(teleportLocation.getWorld().getName())) {
                 safeTeleport(player, teleportLocation);
                 playerLocations.remove(playerId);
-                player.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                "&aВы были досрочно телепортированы на исходную позицию."));
+                teleportSuccessful = true;
             }
         }
 
-        // Если не удалось найти подходящую локацию
-        if (teleportLocation == null || teleportLocation.getWorld() == null ||
-                isInDuelWorld(teleportLocation.getWorld().getName())) {
+        // Отправляем сообщение только один раз, после проверки всех вариантов телепортации
+        if (teleportSuccessful) {
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "&aВы были досрочно телепортированы на исходную позицию."));
+        } else {
             player.sendMessage(ColorUtils.colorize(
                     plugin.getConfig().getString("messages.prefix") +
                             "&cНе удалось найти безопасную локацию для телепортации. Пожалуйста, используйте /spawn."));
@@ -2868,10 +2870,6 @@ public class DuelManager {
             if (hasDelayedReturnTask(playerId)) {
                 // Дуэль закончилась, игрок ожидает возврата - разрешаем отмену
                 cancelDelayedReturnAndTeleport(player);
-                player.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                "&aВы были досрочно телепортированы на исходную позицию."));
-                return;
             } else {
                 // Игрок в активной дуэли - не разрешаем отмену
                 player.sendMessage(ColorUtils.colorize(

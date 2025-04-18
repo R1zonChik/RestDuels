@@ -179,10 +179,6 @@ public class DuelCommand implements CommandExecutor {
         if (plugin.getDuelManager().hasDelayedReturnTask(playerId)) {
             // Отменяем задачу и возвращаем игрока
             plugin.getDuelManager().cancelDelayedReturnAndTeleport(player);
-
-            player.sendMessage(ColorUtils.colorize(
-                    plugin.getConfig().getString("messages.prefix") +
-                            "&aВы были досрочно телепортированы на исходную позицию."));
         } else if (plugin.getDuelManager().isPlayerInDuel(playerId)) {
             // Если игрок в активной дуэли, запрещаем досрочный возврат
             player.sendMessage(ColorUtils.colorize(

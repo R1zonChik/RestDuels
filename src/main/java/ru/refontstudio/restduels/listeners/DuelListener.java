@@ -5,6 +5,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerToggleFlightEvent;
@@ -20,6 +21,41 @@ public class DuelListener implements Listener {
 
     public DuelListener(RestDuels plugin) {
         this.plugin = plugin;
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onEntityDamage(EntityDamageByEntityEvent event) {
+        // Проверяем, является ли атакующий игроком
+        if (event.getDamager() instanceof Player) {
+            Player attacker = (Player) event.getDamager();
+
+            // Если атакующий находится в состоянии отсчета, отменяем урон
+            if (plugin.getDuelManager().isPlayerInCountdown(attacker.getUniqueId())) {
+                event.setCancelled(true);
+                attacker.sendMessage(ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") +
+                                "&cВы не можете атаковать во время подготовки к дуэли!"));
+                return;
+            }
+        }
+
+        // Проверяем, является ли цель игроком
+        if (event.getEntity() instanceof Player) {
+            Player victim = (Player) event.getEntity();
+
+            // Если цель находится в состоянии отсчета, отменяем урон
+            if (plugin.getDuelManager().isPlayerInCountdown(victim.getUniqueId())) {
+                event.setCancelled(true);
+
+                // Если атакующий - игрок, отправляем ему сообщение
+                if (event.getDamager() instanceof Player) {
+                    Player attacker = (Player) event.getDamager();
+                    attacker.sendMessage(ColorUtils.colorize(
+                            plugin.getConfig().getString("messages.prefix") +
+                                    "&cВы не можете атаковать игрока во время подготовки к дуэли!"));
+                }
+            }
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)

@@ -2309,8 +2309,6 @@ public class DuelManager {
 
         // ИЗМЕНЕНО: Используем originalWorldLocations вместо playerLocations
         Location teleportLocation = null;
-
-        // Переменная для отслеживания успешности телепортации
         boolean teleportSuccessful = false;
 
         // Сначала проверяем originalWorldLocations - там хранится локация ДО входа в мир дуэли
@@ -2870,6 +2868,8 @@ public class DuelManager {
             if (hasDelayedReturnTask(playerId)) {
                 // Дуэль закончилась, игрок ожидает возврата - разрешаем отмену
                 cancelDelayedReturnAndTeleport(player);
+                // Убираем дублирующее сообщение, так как оно уже отправляется в методе cancelDelayedReturnAndTeleport
+                return;
             } else {
                 // Игрок в активной дуэли - не разрешаем отмену
                 player.sendMessage(ColorUtils.colorize(

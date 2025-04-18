@@ -2101,24 +2101,31 @@ public class DuelManager {
             // В обычном режиме NORMAL
             if (isDraw) {
                 // При ничьей даем время собрать вещи обоим
+                // При ничьей даем время собрать вещи обоим
                 String delayMessage = ColorUtils.colorize(
                         plugin.getConfig().getString("messages.prefix") +
                                 plugin.getConfig().getString("messages.delay-collect"));
 
-                // Создаем отложенную задачу для возврата игроков через 60 секунд
+// Создаем отложенную задачу для возврата игроков через 60 секунд
                 BukkitTask delayedTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
                     if (player1 != null && player1.isOnline()) {
-                        returnPlayer(player1, false);
-                        player1.sendMessage(ColorUtils.colorize(
-                                plugin.getConfig().getString("messages.prefix") +
-                                        "&aВремя сбора ресурсов истекло. Вы были телепортированы на исходную позицию."));
+                        // Проверяем, находится ли игрок все еще в мире дуэлей
+                        if (isInDuelWorld(player1)) {
+                            returnPlayer(player1, false);
+                            player1.sendMessage(ColorUtils.colorize(
+                                    plugin.getConfig().getString("messages.prefix") +
+                                            "&aВремя сбора ресурсов истекло. Вы были телепортированы на исходную позицию."));
+                        }
                     }
 
                     if (player2 != null && player2.isOnline()) {
-                        returnPlayer(player2, false);
-                        player2.sendMessage(ColorUtils.colorize(
-                                plugin.getConfig().getString("messages.prefix") +
-                                        "&aВремя сбора ресурсов истекло. Вы были телепортированы на исходную позицию."));
+                        // Проверяем, находится ли игрок все еще в мире дуэлей
+                        if (isInDuelWorld(player2)) {
+                            returnPlayer(player2, false);
+                            player2.sendMessage(ColorUtils.colorize(
+                                    plugin.getConfig().getString("messages.prefix") +
+                                            "&aВремя сбора ресурсов истекло. Вы были телепортированы на исходную позицию."));
+                        }
                     }
 
                     // Логируем количество построенных блоков для статистики
@@ -2173,48 +2180,50 @@ public class DuelManager {
                     BukkitTask winnerTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
                         Player winnerPlayer = Bukkit.getPlayer(winnerUUID);
                         if (winnerPlayer != null && winnerPlayer.isOnline()) {
-                            // Возвращаем победителя, НО сохраняем текущий инвентарь (не восстанавливаем)
-                            // Очищаем только сохраненные данные и телепортируем обратно
+                            if (isInDuelWorld(winnerPlayer)) {
+                                // Возвращаем победителя, НО сохраняем текущий инвентарь (не восстанавливаем)
+                                // Очищаем только сохраненные данные и телепортируем обратно
 
-                            // Удаляем из списков
-                            frozenPlayers.remove(winnerUUID);
-                            playerArenas.remove(winnerUUID);
+                                // Удаляем из списков
+                                frozenPlayers.remove(winnerUUID);
+                                playerArenas.remove(winnerUUID);
 
-                            // Отменяем проверку полета
-                            stopFlightCheck(winnerUUID);
+                                // Отменяем проверку полета
+                                stopFlightCheck(winnerUUID);
 
-                            // Восстанавливаем статус полета
-                            if (playerFlightStatus.containsKey(winnerUUID)) {
-                                boolean allowFlight = playerFlightStatus.get(winnerUUID);
-                                winnerPlayer.setAllowFlight(allowFlight);
-                                if (allowFlight) winnerPlayer.setFlying(allowFlight);
-                                playerFlightStatus.remove(winnerUUID);
-                            }
-
-                            // Телепортируем на исходную позицию
-                            Location teleportLocation = null;
-                            if (originalWorldLocations.containsKey(winnerUUID)) {
-                                teleportLocation = originalWorldLocations.get(winnerUUID);
-                                if (teleportLocation != null && teleportLocation.getWorld() != null &&
-                                        !isInDuelWorld(teleportLocation.getWorld().getName())) {
-                                    safeTeleport(winnerPlayer, teleportLocation);
+                                // Восстанавливаем статус полета
+                                if (playerFlightStatus.containsKey(winnerUUID)) {
+                                    boolean allowFlight = playerFlightStatus.get(winnerUUID);
+                                    winnerPlayer.setAllowFlight(allowFlight);
+                                    if (allowFlight) winnerPlayer.setFlying(allowFlight);
+                                    playerFlightStatus.remove(winnerUUID);
                                 }
-                            } else if (playerLocations.containsKey(winnerUUID)) {
-                                teleportLocation = playerLocations.get(winnerUUID);
-                                if (teleportLocation != null && teleportLocation.getWorld() != null &&
-                                        !isInDuelWorld(teleportLocation.getWorld().getName())) {
-                                    safeTeleport(winnerPlayer, teleportLocation);
-                                    playerLocations.remove(winnerUUID);
+
+                                // Телепортируем на исходную позицию
+                                Location teleportLocation = null;
+                                if (originalWorldLocations.containsKey(winnerUUID)) {
+                                    teleportLocation = originalWorldLocations.get(winnerUUID);
+                                    if (teleportLocation != null && teleportLocation.getWorld() != null &&
+                                            !isInDuelWorld(teleportLocation.getWorld().getName())) {
+                                        safeTeleport(winnerPlayer, teleportLocation);
+                                    }
+                                } else if (playerLocations.containsKey(winnerUUID)) {
+                                    teleportLocation = playerLocations.get(winnerUUID);
+                                    if (teleportLocation != null && teleportLocation.getWorld() != null &&
+                                            !isInDuelWorld(teleportLocation.getWorld().getName())) {
+                                        safeTeleport(winnerPlayer, teleportLocation);
+                                        playerLocations.remove(winnerUUID);
+                                    }
                                 }
+
+                                // Удаляем сохраненные данные инвентаря (не восстанавливаем)
+                                originalInventories.remove(winnerUUID);
+                                originalArmor.remove(winnerUUID);
+
+                                winnerPlayer.sendMessage(ColorUtils.colorize(
+                                        plugin.getConfig().getString("messages.prefix") +
+                                                "&aВремя сбора ресурсов истекло. Вы были телепортированы на исходную позицию с собранными вещами."));
                             }
-
-                            // Удаляем сохраненные данные инвентаря (не восстанавливаем)
-                            originalInventories.remove(winnerUUID);
-                            originalArmor.remove(winnerUUID);
-
-                            winnerPlayer.sendMessage(ColorUtils.colorize(
-                                    plugin.getConfig().getString("messages.prefix") +
-                                            "&aВремя сбора ресурсов истекло. Вы были телепортированы на исходную позицию с собранными вещами."));
                         }
 
                         // Логируем количество построенных блоков для статистики

@@ -77,10 +77,6 @@ public class DuelManager {
         }
     }
 
-    public boolean isPlayerInCountdown(UUID playerId) {
-        return duelCountdownPlayers.contains(playerId);
-    }
-
     /**
      * Проверяет, можно ли телепортировать игрока (защита от двойной телепортации)
      * @param playerId UUID игрока
@@ -1110,7 +1106,8 @@ public class DuelManager {
         saveOriginalLocation(player1);
         saveOriginalLocation(player2);
 
-        // ИЗМЕНЕНО: Теперь не замораживаем игроков, а добавляем их в список отсчета
+        // НЕ добавляем игроков в frozenPlayers - они не должны быть заморожены
+        // Добавляем только в список подготовки
         duelCountdownPlayers.add(player1.getUniqueId());
         duelCountdownPlayers.add(player2.getUniqueId());
 
@@ -1124,13 +1121,16 @@ public class DuelManager {
         player2.setAllowFlight(false);
         player2.setFlying(false);
 
-        // ДОБАВЛЕНО: Сохраняем оригинальную скорость и устанавливаем ускорение x2
-        originalWalkSpeed.put(player1.getUniqueId(), player1.getWalkSpeed());
-        originalWalkSpeed.put(player2.getUniqueId(), player2.getWalkSpeed());
+        // ИСПРАВЛЕНО: Сохраняем оригинальную скорость и устанавливаем ускорение x2
+        // Берем текущую скорость и умножаем ее на 2
+        float base1 = player1.getWalkSpeed();
+        float base2 = player2.getWalkSpeed();
+        originalWalkSpeed.put(player1.getUniqueId(), base1);
+        originalWalkSpeed.put(player2.getUniqueId(), base2);
 
-        // Устанавливаем скорость x2 (стандартная скорость обычно 0.2)
-        player1.setWalkSpeed(0.4f);
-        player2.setWalkSpeed(0.4f);
+        // Устанавливаем скорость в 2 раза больше текущей
+        player1.setWalkSpeed(base1 * 2);
+        player2.setWalkSpeed(base2 * 2);
 
         // Телепортируем игроков на арену безопасно
         safeTeleport(player1, arena.getSpawn1());
@@ -1165,35 +1165,24 @@ public class DuelManager {
     public void unfreezeAndCancelDuel(Player player) {
         UUID playerId = player.getUniqueId();
 
-        // ДОБАВЛЕНО: Удаляем игрока из списка отсчета
+        // Удаляем игрока из списка отсчета
         duelCountdownPlayers.remove(playerId);
 
-        // ДОБАВЛЕНО: Восстанавливаем скорость
+        // Восстанавливаем скорость
         if (originalWalkSpeed.containsKey(playerId)) {
             player.setWalkSpeed(originalWalkSpeed.get(playerId));
             originalWalkSpeed.remove(playerId);
         }
 
-        // Удаляем игрока из списка замороженных
+        // Удаляем игрока из списка замороженных (если он там есть)
         frozenPlayers.remove(playerId);
 
-        // Находим второго игрока, который был заморожен с этим игроком
+        // Находим второго игрока, который был в отсчете с этим игроком
         Player otherPlayer = null;
         UUID otherPlayerId = null;
         Arena playerArena = null;
 
-        // Ищем другого игрока в той же локации/мире
-        for (UUID id : new HashSet<>(frozenPlayers)) {
-            Player p = Bukkit.getPlayer(id);
-            if (p != null && p.isOnline() && player.getWorld().equals(p.getWorld()) &&
-                    player.getLocation().distance(p.getLocation()) < 50) {
-                otherPlayer = p;
-                otherPlayerId = id;
-                break;
-            }
-        }
-
-        // ДОБАВЛЕНО: Также ищем в списке отсчета
+        // Ищем другого игрока в списке отсчета
         for (UUID id : new HashSet<>(duelCountdownPlayers)) {
             Player p = Bukkit.getPlayer(id);
             if (p != null && p.isOnline() && player.getWorld().equals(p.getWorld()) &&
@@ -1214,12 +1203,12 @@ public class DuelManager {
             }
         }
 
-        // Если нашли другого игрока, размораживаем и возвращаем его
+        // Если нашли другого игрока, отменяем подготовку и возвращаем его
         if (otherPlayer != null) {
-            frozenPlayers.remove(otherPlayerId);
             duelCountdownPlayers.remove(otherPlayerId);
+            frozenPlayers.remove(otherPlayerId);
 
-            // ДОБАВЛЕНО: Восстанавливаем скорость для другого игрока
+            // Восстанавливаем скорость для другого игрока
             if (originalWalkSpeed.containsKey(otherPlayerId)) {
                 otherPlayer.setWalkSpeed(originalWalkSpeed.get(otherPlayerId));
                 originalWalkSpeed.remove(otherPlayerId);
@@ -1239,6 +1228,11 @@ public class DuelManager {
             occupiedArenas.remove(playerArena.getId());
         }
     }
+
+    public boolean isPlayerInCountdown(UUID playerId) {
+        return duelCountdownPlayers.contains(playerId);
+    }
+
 
     /**
      * Возвращает игрока на исходную позицию и восстанавливает его состояние
@@ -1433,7 +1427,6 @@ public class DuelManager {
         // Удалить другие сохраненные атрибуты при необходимости
     }
 
-    // Метод для запуска красивого отсчета с титлами
     private void startCountdown(Player player1, Player player2, DuelType type, Arena arena) {
         final int[] countdown = {8}; // Начальное значение отсчета
 
@@ -1444,10 +1437,10 @@ public class DuelManager {
             public void run() {
                 // Проверяем, что оба игрока все еще онлайн перед каждым тиком отсчета
                 if (!player1.isOnline() || !player2.isOnline() ||
-                        !frozenPlayers.contains(player1.getUniqueId()) ||
-                        !frozenPlayers.contains(player2.getUniqueId())) {
+                        !duelCountdownPlayers.contains(player1.getUniqueId()) ||
+                        !duelCountdownPlayers.contains(player2.getUniqueId())) {
 
-                    // Один из игроков вышел или был разморожен - отменяем отсчет
+                    // Один из игроков вышел или был удален из списка - отменяем отсчет
                     if (taskId[0] != -1) {
                         Bukkit.getScheduler().cancelTask(taskId[0]);
                     }
@@ -1455,12 +1448,22 @@ public class DuelManager {
                     // Определяем, кто остался онлайн
                     Player remainingPlayer = null;
 
-                    if (player1.isOnline() && frozenPlayers.contains(player1.getUniqueId())) {
+                    if (player1.isOnline() && duelCountdownPlayers.contains(player1.getUniqueId())) {
                         remainingPlayer = player1;
-                        frozenPlayers.remove(player1.getUniqueId());
-                    } else if (player2.isOnline() && frozenPlayers.contains(player2.getUniqueId())) {
+                        duelCountdownPlayers.remove(player1.getUniqueId());
+                        // Восстанавливаем скорость
+                        if (originalWalkSpeed.containsKey(player1.getUniqueId())) {
+                            player1.setWalkSpeed(originalWalkSpeed.get(player1.getUniqueId()));
+                            originalWalkSpeed.remove(player1.getUniqueId());
+                        }
+                    } else if (player2.isOnline() && duelCountdownPlayers.contains(player2.getUniqueId())) {
                         remainingPlayer = player2;
-                        frozenPlayers.remove(player2.getUniqueId());
+                        duelCountdownPlayers.remove(player2.getUniqueId());
+                        // Восстанавливаем скорость
+                        if (originalWalkSpeed.containsKey(player2.getUniqueId())) {
+                            player2.setWalkSpeed(originalWalkSpeed.get(player2.getUniqueId()));
+                            originalWalkSpeed.remove(player2.getUniqueId());
+                        }
                     }
 
                     // Если кто-то остался, возвращаем его и отправляем сообщение
@@ -1488,17 +1491,31 @@ public class DuelManager {
                 if (countdown[0] <= 0) {
                     // Отсчет завершен, еще раз проверяем, что оба игрока онлайн
                     if (player1.isOnline() && player2.isOnline() &&
-                            frozenPlayers.contains(player1.getUniqueId()) &&
-                            frozenPlayers.contains(player2.getUniqueId())) {
+                            duelCountdownPlayers.contains(player1.getUniqueId()) &&
+                            duelCountdownPlayers.contains(player2.getUniqueId())) {
 
                         // Отменяем текущую задачу отсчета
                         if (taskId[0] != -1) {
                             Bukkit.getScheduler().cancelTask(taskId[0]);
                         }
 
-                        // Удаляем игроков из списка замороженных
-                        frozenPlayers.remove(player1.getUniqueId());
-                        frozenPlayers.remove(player2.getUniqueId());
+                        // Восстанавливаем нормальную скорость для обоих игроков
+                        if (originalWalkSpeed.containsKey(player1.getUniqueId())) {
+                            player1.setWalkSpeed(originalWalkSpeed.get(player1.getUniqueId()));
+                            originalWalkSpeed.remove(player1.getUniqueId());
+                        }
+                        if (originalWalkSpeed.containsKey(player2.getUniqueId())) {
+                            player2.setWalkSpeed(originalWalkSpeed.get(player2.getUniqueId()));
+                            originalWalkSpeed.remove(player2.getUniqueId());
+                        }
+
+                        // ИСПРАВЛЕНО: Телепортируем игроков обратно на их начальные позиции
+                        safeTeleport(player1, arena.getSpawn1());
+                        safeTeleport(player2, arena.getSpawn2());
+
+                        // Удаляем игроков из списка отсчета
+                        duelCountdownPlayers.remove(player1.getUniqueId());
+                        duelCountdownPlayers.remove(player2.getUniqueId());
 
                         // Начинаем дуэль
                         startDuel(player1, player2, type, arena);
@@ -1512,12 +1529,22 @@ public class DuelManager {
                         // Определяем, кто остался онлайн
                         Player remainingPlayer = null;
 
-                        if (player1.isOnline() && frozenPlayers.contains(player1.getUniqueId())) {
+                        if (player1.isOnline() && duelCountdownPlayers.contains(player1.getUniqueId())) {
                             remainingPlayer = player1;
-                            frozenPlayers.remove(player1.getUniqueId());
-                        } else if (player2.isOnline() && frozenPlayers.contains(player2.getUniqueId())) {
+                            duelCountdownPlayers.remove(player1.getUniqueId());
+                            // Восстанавливаем скорость
+                            if (originalWalkSpeed.containsKey(player1.getUniqueId())) {
+                                player1.setWalkSpeed(originalWalkSpeed.get(player1.getUniqueId()));
+                                originalWalkSpeed.remove(player1.getUniqueId());
+                            }
+                        } else if (player2.isOnline() && duelCountdownPlayers.contains(player2.getUniqueId())) {
                             remainingPlayer = player2;
-                            frozenPlayers.remove(player2.getUniqueId());
+                            duelCountdownPlayers.remove(player2.getUniqueId());
+                            // Восстанавливаем скорость
+                            if (originalWalkSpeed.containsKey(player2.getUniqueId())) {
+                                player2.setWalkSpeed(originalWalkSpeed.get(player2.getUniqueId()));
+                                originalWalkSpeed.remove(player2.getUniqueId());
+                            }
                         }
 
                         // Если кто-то остался, возвращаем его и отправляем сообщение
@@ -1557,7 +1584,7 @@ public class DuelManager {
                 String countTitle = color + countdown[0];
                 String countSubtitle = "&eПодготовьтесь к дуэли!";
 
-                if (player1.isOnline() && frozenPlayers.contains(player1.getUniqueId())) {
+                if (player1.isOnline() && duelCountdownPlayers.contains(player1.getUniqueId())) {
                     player1.sendTitle(
                             ChatColor.translateAlternateColorCodes('&', countTitle),
                             ChatColor.translateAlternateColorCodes('&', countSubtitle),
@@ -1570,7 +1597,7 @@ public class DuelManager {
                     player1.playSound(player1.getLocation(), countSound, 1.0f, pitch);
                 }
 
-                if (player2.isOnline() && frozenPlayers.contains(player2.getUniqueId())) {
+                if (player2.isOnline() && duelCountdownPlayers.contains(player2.getUniqueId())) {
                     player2.sendTitle(
                             ChatColor.translateAlternateColorCodes('&', countTitle),
                             ChatColor.translateAlternateColorCodes('&', countSubtitle),
@@ -3400,14 +3427,13 @@ public class DuelManager {
      * @return true, если игрок в активной дуэли
      */
     public boolean isPlayerInDuel(UUID playerId) {
-        // ИЗМЕНЕНО: Добавлена проверка на наличие отложенной задачи возврата
         // Если у игрока есть отложенная задача возврата, то дуэль уже завершена
-        // и он не считается находящимся в активной дуэли
         if (delayedReturnTasks.containsKey(playerId)) {
             return false;
         }
 
-        return playerDuels.containsKey(playerId);
+        // Игрок в дуэли, если он в активной дуэли или в процессе подготовки
+        return playerDuels.containsKey(playerId) || duelCountdownPlayers.contains(playerId);
     }
 
     public boolean isPlayerFrozen(UUID playerId) {

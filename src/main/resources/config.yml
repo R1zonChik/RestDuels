@@ -170,7 +170,7 @@ messages:
   cannot-cancel-started-duel: "&cНельзя отменить дуэль после её начала!"
   duel-started: "&aДуэль началась! Удачи!"
   cancel-duel-message: "&eДля отмены дуэли нажмите на кнопку ниже в течение &c%time% &eсекунд."
-  cancel-search-button: "&c[Отменить поиск дуэли]"
+  cancel-search-button: "&c[Отменить дуэль]"
   cancel-search-message: "&eДля отмены поиска дуэли нажмите на кнопку ниже в течение &c30 &eсекунд."
   opponent-found: "&eНайден соперник! У вас есть &c8 секунд &eдля отмены дуэли."
   opponent-cancelled: "&cПротивник отменил дуэль!"

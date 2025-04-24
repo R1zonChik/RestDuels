@@ -181,6 +181,52 @@ public final class RestDuels extends JavaPlugin {
             arenaGuardian.stopPeriodicCheck();
         }
 
+        // Снимаем блокировку команд со всех игроков
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            // Удаляем метаданные блокировки команд
+            if (player.hasMetadata("restduels_blocked_commands")) {
+                player.removeMetadata("restduels_blocked_commands", this);
+            }
+
+            // Отправляем сообщение игрокам
+            player.sendMessage(ColorUtils.colorize("&a[RestDuels] &eПлагин выключен, все ограничения сняты."));
+
+            // Если есть CommandBlocker, очищаем его
+            try {
+                if (commandBlocker != null) {
+                    commandBlocker.removePlayer(player.getUniqueId());
+                }
+            } catch (Exception e) {
+                // Игнорируем ошибки
+            }
+        }
+
+        // Очищаем все задачи и данные
+        if (duelManager != null) {
+            duelManager.clearAllDuelsWithoutTasks();
+        }
+
+        // Пытаемся очистить CommandBlocker через рефлексию
+        try {
+            Class<?> commandBlockerClass = Class.forName("ru.refontstudio.restduels.listeners.CommandBlocker");
+            if (commandBlockerClass != null) {
+                // Проверяем наличие метода clearAllPlayers
+                try {
+                    java.lang.reflect.Method clearMethod = commandBlockerClass.getMethod("clearAllPlayers");
+                    if (clearMethod != null) {
+                        java.lang.reflect.Method getInstanceMethod = commandBlockerClass.getMethod("getInstance");
+                        Object commandBlocker = getInstanceMethod.invoke(null);
+                        clearMethod.invoke(commandBlocker);
+                        getLogger().info("CommandBlocker очищен успешно.");
+                    }
+                } catch (Exception e) {
+                    getLogger().warning("Ошибка при очистке CommandBlocker: " + e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            // Игнорируем ошибки, если класс не найден
+        }
+
         // Сохраняем статистику
         if (statsManager != null) {
             statsManager.saveAllStats();

@@ -92,13 +92,21 @@ public class CommandBlocker implements Listener {
     }
 
     /**
-     * Очищает список всех заблокированных игроков
+     * Очищает всех игроков из списка заблокированных команд
      */
     public void clearAllPlayers() {
-        blockedPlayers.clear();
-        if (plugin.getConfig().getBoolean("debug", false)) {
-            plugin.getLogger().info("Очищен список всех заблокированных игроков");
+        // Копируем список, чтобы избежать ConcurrentModificationException
+        Set<UUID> playersCopy = new HashSet<>(blockedPlayers);
+
+        // Удаляем всех игроков из списка
+        for (UUID playerId : playersCopy) {
+            removePlayer(playerId);
         }
+
+        // Очищаем список
+        blockedPlayers.clear();
+
+        plugin.getLogger().info("Все игроки удалены из CommandBlocker.");
     }
 
     /**
@@ -316,6 +324,8 @@ public class CommandBlocker implements Listener {
         allowedCommands.add(command);
         allowedCommands.add(command.substring(1)); // Добавляем вариант без /
     }
+
+
 
     /**
      * Удаляет команду из списка разрешенных

@@ -16,11 +16,14 @@ import ru.refontstudio.restduels.models.DuelType;
 import ru.refontstudio.restduels.models.PlayerStats;
 import ru.refontstudio.restduels.utils.ColorUtils;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 public class DuelMenu implements InventoryHolder {
     private final RestDuels plugin;
@@ -82,10 +85,21 @@ public class DuelMenu implements InventoryHolder {
             ItemStack item;
 
             // Особая обработка для головы игрока
-            if (material == Material.PLAYER_HEAD && itemSection.getBoolean("use_player_head", false)) {
+            if (material == Material.PLAYER_HEAD) {
                 item = new ItemStack(material);
                 SkullMeta skullMeta = (SkullMeta) item.getItemMeta();
-                skullMeta.setOwningPlayer(player);
+
+                // Проверяем, есть ли кастомная текстура
+                String textureValue = itemSection.getString("texture_value", null);
+
+                if (textureValue != null && !textureValue.isEmpty()) {
+                    // Применяем кастомную текстуру
+                    applyCustomTexture(skullMeta, textureValue);
+                } else if (itemSection.getBoolean("use_player_head", false)) {
+                    // Используем голову игрока, если текстуры нет
+                    skullMeta.setOwningPlayer(player);
+                }
+
                 skullMeta.setDisplayName(name);
 
                 if (!processedLore.isEmpty()) {
@@ -114,6 +128,42 @@ public class DuelMenu implements InventoryHolder {
                     }
                 }
             }
+        }
+    }
+
+    // Метод для применения кастомной текстуры к голове с использованием рефлексии
+    private void applyCustomTexture(SkullMeta meta, String textureValue) {
+        try {
+            // Загружаем классы через рефлексию
+            Class<?> gameProfileClass = Class.forName("com.mojang.authlib.GameProfile");
+            Class<?> propertyClass = Class.forName("com.mojang.authlib.properties.Property");
+
+            // Создаем GameProfile
+            Object profile = gameProfileClass
+                    .getConstructor(UUID.class, String.class)
+                    .newInstance(UUID.randomUUID(), null);
+
+            // Получаем properties из профиля
+            Method getPropertiesMethod = gameProfileClass.getMethod("getProperties");
+            Object properties = getPropertiesMethod.invoke(profile);
+
+            // Создаем Property с текстурой
+            Object property = propertyClass
+                    .getConstructor(String.class, String.class)
+                    .newInstance("textures", textureValue);
+
+            // Добавляем property в properties
+            Method putMethod = properties.getClass().getMethod("put", Object.class, Object.class);
+            putMethod.invoke(properties, "textures", property);
+
+            // Устанавливаем GameProfile в SkullMeta
+            Field profileField = meta.getClass().getDeclaredField("profile");
+            profileField.setAccessible(true);
+            profileField.set(meta, profile);
+
+        } catch (Exception e) {
+            plugin.getLogger().warning("Не удалось применить текстуру к голове: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 

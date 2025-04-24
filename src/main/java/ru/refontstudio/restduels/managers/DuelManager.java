@@ -1,6 +1,9 @@
 package ru.refontstudio.restduels.managers;
 
 import net.md_5.bungee.api.ChatMessageType;
+import net.md_5.bungee.api.chat.ClickEvent;
+import net.md_5.bungee.api.chat.ComponentBuilder;
+import net.md_5.bungee.api.chat.HoverEvent;
 import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.*;
 import org.bukkit.block.Block;
@@ -43,6 +46,7 @@ public class DuelManager {
     private final Map<UUID, ItemStack[]> originalInventories = new HashMap<>(); // Инвентарь до начала дуэли
     private final Map<UUID, ItemStack[]> originalArmor = new HashMap<>(); // Броня до начала дуэли
     private final Map<UUID, BukkitTask> flightCheckTasks = new HashMap<>();
+    private Set<UUID> countdownPlayers = new HashSet<>();
     private final Map<UUID, Duel> playerDuels = new HashMap<>();
     private final Set<UUID> playersMarkedForTeleport = new HashSet<>();
     private final Map<UUID, Location> playerLocations = new HashMap<>();
@@ -1619,6 +1623,28 @@ public class DuelManager {
         taskId[0] = countdownTask.getTaskId();
     }
 
+    // Добавь этот метод в класс DuelManager
+    public void sendPreparationMessage(Player player) {
+        // Создаем кликабельную кнопку в чате
+        TextComponent message = new TextComponent(ColorUtils.colorize(
+                plugin.getConfig().getString("messages.prefix") +
+                        "&eПодготовка к дуэли! "));
+
+        TextComponent cancelButton = new TextComponent(ColorUtils.colorize("&c&l[Отменить дуэль]"));
+        cancelButton.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/duel cancel"));
+        cancelButton.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                new ComponentBuilder(ColorUtils.colorize("&7Нажмите, чтобы отменить дуэль")).create()));
+
+        message.addExtra(cancelButton);
+
+        player.spigot().sendMessage(message);
+    }
+
+    // Исправленный метод
+    public boolean isPlayerInPreparation(UUID playerId) {
+        return frozenPlayers.contains(playerId) || countdownPlayers.contains(playerId);
+    }
+
     /**
      * Метод для начала дуэли с автоматическим восстановлением арены
      */
@@ -1646,14 +1672,19 @@ public class DuelManager {
             disableGodModeIfEnabled(player2);
         }
 
-        // Создаем дуэль
+// Создаем дуэль
         Duel duel = new Duel(player1.getUniqueId(), player2.getUniqueId(), type, arena);
 
-        // Регистрируем дуэль
+// Регистрируем дуэль
         playerDuels.put(player1.getUniqueId(), duel);
         playerDuels.put(player2.getUniqueId(), duel);
 
-        // Запускаем проверку полета для обоих игроков
+// ДОБАВЬ КОД ЗДЕСЬ:
+// Отправляем сообщение с кнопкой отмены дуэли
+        sendPreparationMessage(player1);
+        sendPreparationMessage(player2);
+
+// Запускаем проверку полета для обоих игроков
         startFlightCheck(player1);
         startFlightCheck(player2);
 

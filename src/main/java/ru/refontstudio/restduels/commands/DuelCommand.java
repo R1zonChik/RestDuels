@@ -45,14 +45,22 @@ public class DuelCommand implements CommandExecutor {
             switch (subCommand) {
                 case "cancel":
                     // Отменяем дуэль
-                    if (plugin.getDuelManager().isPlayerInDuel(player.getUniqueId())) {
+                    if (plugin.getDuelManager().isPlayerInPreparation(player.getUniqueId())) {
+                        // Если игрок в стадии подготовки, можно отменить дуэль
+                        plugin.getDuelManager().cancelDuel(player);
+                        player.sendMessage(ColorUtils.colorize(
+                                plugin.getConfig().getString("messages.prefix") +
+                                        "&aДуэль успешно отменена!"));
+                    } else if (plugin.getDuelManager().isPlayerInDuel(player.getUniqueId())) {
                         // Если дуэль уже началась, нельзя отменить
                         player.sendMessage(ColorUtils.colorize(
                                 plugin.getConfig().getString("messages.prefix") +
                                         "&cВы не можете выйти из активной дуэли! Используйте /hub, чтобы покинуть сервер."));
                     } else {
-                        // Если дуэль еще не началась (в очереди или заморожен), можно отменить
-                        plugin.getDuelManager().cancelDuel(player);
+                        // Если игрок не в дуэли и не в подготовке
+                        player.sendMessage(ColorUtils.colorize(
+                                plugin.getConfig().getString("messages.prefix") +
+                                        "&cВы не участвуете в дуэли!"));
                     }
                     break;
                 case "normal":

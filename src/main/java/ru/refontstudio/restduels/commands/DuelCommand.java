@@ -44,20 +44,32 @@ public class DuelCommand implements CommandExecutor {
 
             switch (subCommand) {
                 case "cancel":
+                    // Добавляем отладочный лог
+                    System.out.println("[DUEL-CANCEL] Получена команда /duel cancel от игрока " + player.getName());
+
+                    // Проверяем, находится ли игрок в очереди на поиск дуэли
+                    boolean inSearch = false;
+                    for (DuelType type : DuelType.values()) {
+                        if (plugin.getDuelManager().isPlayerInQueue(player.getUniqueId(), type)) {
+                            inSearch = true;
+                            break;
+                        }
+                    }
+
                     // Отменяем дуэль
-                    if (plugin.getDuelManager().isPlayerInPreparation(player.getUniqueId())) {
-                        // Если игрок в стадии подготовки, можно отменить дуэль
+                    if (inSearch || plugin.getDuelManager().isPlayerInPreparation(player.getUniqueId())) {
+                        // Если игрок в поиске или в стадии подготовки, можно отменить
+                        System.out.println("[DUEL-CANCEL] Игрок " + player.getName() + " в поиске или подготовке, отменяем");
                         plugin.getDuelManager().cancelDuel(player);
-                        player.sendMessage(ColorUtils.colorize(
-                                plugin.getConfig().getString("messages.prefix") +
-                                        "&aДуэль успешно отменена!"));
                     } else if (plugin.getDuelManager().isPlayerInDuel(player.getUniqueId())) {
                         // Если дуэль уже началась, нельзя отменить
+                        System.out.println("[DUEL-CANCEL] Игрок " + player.getName() + " в активной дуэли, отмена невозможна");
                         player.sendMessage(ColorUtils.colorize(
                                 plugin.getConfig().getString("messages.prefix") +
                                         "&cВы не можете выйти из активной дуэли! Используйте /hub, чтобы покинуть сервер."));
                     } else {
-                        // Если игрок не в дуэли и не в подготовке
+                        // Если игрок не в дуэли, не в подготовке и не в поиске
+                        System.out.println("[DUEL-CANCEL] Игрок " + player.getName() + " не в дуэли/подготовке/поиске");
                         player.sendMessage(ColorUtils.colorize(
                                 plugin.getConfig().getString("messages.prefix") +
                                         "&cВы не участвуете в дуэли!"));

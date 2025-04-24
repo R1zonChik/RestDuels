@@ -26,6 +26,15 @@ public class Duel {
         // this.arena.setInUse(true);
     }
 
+    /**
+     * Проверяет, началась ли дуэль
+     * @return true, если дуэль началась
+     */
+    public boolean hasStarted() {
+        // Предполагаем, что дуэль началась, если есть задача дуэли
+        return duelTask != null;
+    }
+
     // Геттер и сеттер для timerTask
     public BukkitTask getTimerTask() {
         return timerTask;

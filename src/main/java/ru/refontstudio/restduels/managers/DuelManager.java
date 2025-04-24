@@ -794,7 +794,7 @@ public class DuelManager {
     }
 
     /**
-     * Проверяет, находится ли игрок в очереди на дуэль указанного типа
+     * Проверяет, находится ли игрок в очереди на дуэль определенного типа
      * @param playerId UUID игрока
      * @param type Тип дуэли
      * @return true, если игрок в очереди
@@ -806,6 +806,10 @@ public class DuelManager {
     public void queuePlayer(Player player, DuelType type) {
         UUID playerId = player.getUniqueId();
 
+        if (plugin.getConfig().getBoolean("debug", false)) {
+            plugin.getLogger().info("[DEBUG] Добавление игрока " + player.getName() + " в очередь типа " + type);
+        }
+
         // Проверка на активную дуэль
         if (isPlayerInDuel(playerId)) {
             player.sendMessage(ColorUtils.colorize(
@@ -814,42 +818,16 @@ public class DuelManager {
             return;
         }
 
-        // Проверка на нахождение в очереди (любого типа)
-        for (DuelType queueType : DuelType.values()) {
-            if (queuedPlayers.get(queueType).contains(playerId)) {
-                player.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                "&cВы уже находитесь в очереди! Используйте /duel cancel для отмены."));
-                return;
-            }
-        }
-
-        // Проверка на заморозку
-        if (frozenPlayers.contains(playerId)) {
-            player.sendMessage(ColorUtils.colorize(
-                    plugin.getConfig().getString("messages.prefix") +
-                            "&cВы уже ожидаете начала дуэли! Используйте /duel cancel для отмены."));
-            return;
-        }
-
-        // Проверка на нахождение в очереди на арену
-        for (QueueEntry entry : arenaQueue) {
-            if (entry.player1Id.equals(playerId) || entry.player2Id.equals(playerId)) {
-                player.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                "&cВы уже ожидаете свободную арену! Используйте /duel cancel для отмены."));
-                return;
-            }
-        }
-
-        // Сохраняем местоположение игрока, только если он НЕ в мире дуэлей
+        // Сохраняем локацию и инвентарь
         saveOriginalLocation(player);
-
-        // Сохраняем оригинальный инвентарь игрока для всех типов дуэлей
         saveOriginalInventory(player);
 
         // Добавляем в очередь
         queuedPlayers.get(type).add(playerId);
+
+        if (plugin.getConfig().getBoolean("debug", false)) {
+            plugin.getLogger().info("[DEBUG] Игрок " + player.getName() + " добавлен в очередь типа " + type);
+        }
 
         // Отправляем кнопку отмены
         sendCancelButton(player);
@@ -1126,8 +1104,7 @@ public class DuelManager {
         saveOriginalLocation(player1);
         saveOriginalLocation(player2);
 
-        // НЕ добавляем игроков в frozenPlayers - они не должны быть заморожены
-        // Добавляем только в список подготовки
+        // Добавляем обоих игроков в список подготовки
         duelCountdownPlayers.add(player1.getUniqueId());
         duelCountdownPlayers.add(player2.getUniqueId());
 
@@ -1141,7 +1118,7 @@ public class DuelManager {
         player2.setAllowFlight(false);
         player2.setFlying(false);
 
-        // ИСПРАВЛЕНО: Сохраняем оригинальную скорость и устанавливаем ускорение
+        // Сохраняем оригинальную скорость и устанавливаем ускорение
         float base1 = player1.getWalkSpeed();
         float base2 = player2.getWalkSpeed();
         originalWalkSpeed.put(player1.getUniqueId(), base1);
@@ -1153,9 +1130,35 @@ public class DuelManager {
         player1.setWalkSpeed(newSpeed1);
         player2.setWalkSpeed(newSpeed2);
 
-        // Телепортируем игроков на арену безопасно
+        // ИСПРАВЛЕНИЕ: Добавляем игроков в список для телепортации
+        pendingTeleports.add(player1.getUniqueId());
+        pendingTeleports.add(player2.getUniqueId());
+
+        // Телепортируем первого игрока
+        plugin.getLogger().info("[DEBUG] Телепортация игрока " + player1.getName() + " на спавн 1");
         safeTeleport(player1, arena.getSpawn1());
-        safeTeleport(player2, arena.getSpawn2());
+
+        // Телепортируем второго игрока с небольшой задержкой
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (player2 != null && player2.isOnline()) {
+                pendingTeleports.add(player2.getUniqueId());
+                plugin.getLogger().info("[DEBUG] Телепортация игрока " + player2.getName() + " на спавн 2");
+                safeTeleport(player2, arena.getSpawn2());
+                player2.sendMessage(ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") +
+                                "&aТелепортация на арену завершена. Подготовка к дуэли..."));
+
+                // Удаляем игрока из списка ожидающих телепортацию
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    pendingTeleports.remove(player2.getUniqueId());
+                }, 5L);
+            }
+        }, 5L); // 5 тиков = 0.25 секунды
+
+        // Удаляем первого игрока из списка ожидающих телепортацию
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            pendingTeleports.remove(player1.getUniqueId());
+        }, 5L);
 
         // Оптимизация: очистка инвентаря перед дуэлью для уменьшения объема данных
         if (plugin.getConfig().getBoolean("optimization.clean-inventory-before-duel", false)) {
@@ -1684,21 +1687,6 @@ public class DuelManager {
      */
     public boolean isPlayerInPreparation(UUID playerId) {
         return duelCountdownPlayers.contains(playerId);
-    }
-
-    /**
-     * Проверяет, находится ли игрок в поиске дуэли
-     * @param playerId UUID игрока
-     * @return true, если игрок в поиске
-     */
-    public boolean isPlayerSearchingDuel(UUID playerId) {
-        // Проверяем все типы дуэлей
-        for (DuelType type : DuelType.values()) {
-            if (queuedPlayers.get(type).contains(playerId)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
@@ -3036,13 +3024,20 @@ public class DuelManager {
         }
     }
 
+    /**
+     * Отменяет дуэль для игрока
+     */
     public void cancelDuel(Player player) {
         UUID playerId = player.getUniqueId();
 
-        // 1. Сначала проверяем, находится ли игрок в поиске (в любой из очередей)
+        // Принудительно выводим лог, независимо от настройки debug
+        System.out.println("[DUEL-CANCEL] Запуск cancelDuel для игрока " + player.getName());
+
+        // 1. ПЕРВАЯ ПРОВЕРКА: Находится ли игрок в очереди на дуэль
         boolean inSearch = false;
         for (DuelType type : DuelType.values()) {
             if (queuedPlayers.get(type).contains(playerId)) {
+                System.out.println("[DUEL-CANCEL] Игрок " + player.getName() + " найден в очереди типа " + type);
                 inSearch = true;
 
                 // Удаляем из очереди
@@ -3052,6 +3047,7 @@ public class DuelManager {
                 if (searchTasks.containsKey(playerId)) {
                     searchTasks.get(playerId).cancel();
                     searchTasks.remove(playerId);
+                    System.out.println("[DUEL-CANCEL] Отменен таймер поиска");
                 }
 
                 // Возвращаем игрока
@@ -3062,22 +3058,27 @@ public class DuelManager {
                         plugin.getConfig().getString("messages.prefix") +
                                 "&aПоиск дуэли успешно отменен!"));
                 player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 1.0f, 0.5f);
+
+                System.out.println("[DUEL-CANCEL] Поиск успешно отменен для игрока " + player.getName());
                 return;
             }
         }
 
-        // 2. Проверяем, находится ли игрок в стадии подготовки (отсчет)
+        // 2. ВТОРАЯ ПРОВЕРКА: Находится ли игрок в подготовке к дуэли
         if (duelCountdownPlayers.contains(playerId)) {
-            // Удаляем из списка отсчета
+            System.out.println("[DUEL-CANCEL] Игрок " + player.getName() + " найден в списке подготовки");
+
+            // Удаляем из списка подготовки
             duelCountdownPlayers.remove(playerId);
 
             // Восстанавливаем скорость
             if (originalWalkSpeed.containsKey(playerId)) {
                 player.setWalkSpeed(originalWalkSpeed.get(playerId));
                 originalWalkSpeed.remove(playerId);
+                System.out.println("[DUEL-CANCEL] Восстановлена скорость ходьбы");
             }
 
-            // Находим второго игрока, который был в отсчете с этим игроком
+            // Находим второго игрока в подготовке
             Player otherPlayer = null;
             UUID otherPlayerId = null;
 
@@ -3087,15 +3088,16 @@ public class DuelManager {
                         player.getLocation().distance(p.getLocation()) < 50) {
                     otherPlayer = p;
                     otherPlayerId = id;
+                    System.out.println("[DUEL-CANCEL] Найден второй игрок: " + p.getName());
                     break;
                 }
             }
 
-            // Если нашли другого игрока, отменяем его подготовку
+            // Если нашли второго игрока, отменяем его подготовку
             if (otherPlayer != null) {
                 duelCountdownPlayers.remove(otherPlayerId);
 
-                // Восстанавливаем скорость для другого игрока
+                // Восстанавливаем скорость для второго игрока
                 if (originalWalkSpeed.containsKey(otherPlayerId)) {
                     otherPlayer.setWalkSpeed(originalWalkSpeed.get(otherPlayerId));
                     originalWalkSpeed.remove(otherPlayerId);
@@ -3114,6 +3116,7 @@ public class DuelManager {
                         (player.getWorld().equals(arena.getSpawn1().getWorld()) ||
                                 player.getWorld().equals(arena.getSpawn2().getWorld()))) {
                     occupiedArenas.remove(arena.getId());
+                    System.out.println("[DUEL-CANCEL] Освобождена арена: " + arena.getId());
                     break;
                 }
             }
@@ -3124,14 +3127,36 @@ public class DuelManager {
                     plugin.getConfig().getString("messages.prefix") +
                             "&aПодготовка к дуэли отменена!"));
             player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 1.0f, 0.5f);
+
+            System.out.println("[DUEL-CANCEL] Подготовка успешно отменена для игрока " + player.getName());
             return;
         }
 
-        // 3. Проверяем, находится ли игрок в активной дуэли
+        // 3. ТРЕТЬЯ ПРОВЕРКА: Находится ли игрок в списке замороженных
+        if (frozenPlayers.contains(playerId)) {
+            System.out.println("[DUEL-CANCEL] Игрок " + player.getName() + " найден в списке замороженных");
+
+            // Удаляем из списка замороженных
+            frozenPlayers.remove(playerId);
+
+            // Возвращаем игрока
+            returnPlayer(player, true);
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "&aДуэль успешно отменена!"));
+            player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 1.0f, 0.5f);
+
+            System.out.println("[DUEL-CANCEL] Заморозка успешно отменена для игрока " + player.getName());
+            return;
+        }
+
+        // 4. ЧЕТВЕРТАЯ ПРОВЕРКА: Находится ли игрок в активной дуэли
         if (playerDuels.containsKey(playerId)) {
+            System.out.println("[DUEL-CANCEL] Игрок " + player.getName() + " находится в активной дуэли");
+
             // Проверяем, закончилась ли дуэль и игрок ожидает возврата
             if (hasDelayedReturnTask(playerId)) {
-                // Дуэль закончилась, игрок ожидает возврата - разрешаем отмену
+                System.out.println("[DUEL-CANCEL] Игрок имеет отложенную задачу возврата");
                 cancelDelayedReturnAndTeleport(player);
                 return;
             } else {
@@ -3139,45 +3164,80 @@ public class DuelManager {
                 player.sendMessage(ColorUtils.colorize(
                         plugin.getConfig().getString("messages.prefix") +
                                 "&cВы не можете выйти из активной дуэли! Используйте /hub, чтобы покинуть сервер."));
+                System.out.println("[DUEL-CANCEL] Отмена активной дуэли запрещена");
                 return;
             }
         }
 
-        // 4. Проверяем, находится ли игрок в очереди на арену
-        Iterator<QueueEntry> iterator = arenaQueue.iterator();
-        while (iterator.hasNext()) {
-            QueueEntry entry = iterator.next();
-            if (entry.player1Id.equals(playerId) || entry.player2Id.equals(playerId)) {
-                // Нашли пару с этим игроком
-                UUID otherPlayerId = entry.player1Id.equals(playerId) ? entry.player2Id : entry.player1Id;
-                Player otherPlayer = Bukkit.getPlayer(otherPlayerId);
+        // 5. ПЯТАЯ ПРОВЕРКА: Находится ли игрок в очереди на арену
+        boolean inArenaQueue = isPlayerInArenaQueue(playerId);
+        System.out.println("[DUEL-CANCEL] Игрок " + player.getName() + " в очереди на арену: " + inArenaQueue);
 
-                // Удаляем пару из очереди
-                iterator.remove();
+        if (inArenaQueue) {
+            Iterator<QueueEntry> iterator = arenaQueue.iterator();
+            while (iterator.hasNext()) {
+                QueueEntry entry = iterator.next();
+                if (entry.player1Id.equals(playerId) || entry.player2Id.equals(playerId)) {
+                    System.out.println("[DUEL-CANCEL] Игрок " + player.getName() + " найден в очереди на арену");
 
-                // Возвращаем игроков
-                returnPlayer(player, true);
-                if (otherPlayer != null && otherPlayer.isOnline()) {
-                    returnPlayer(otherPlayer, true);
-                    otherPlayer.sendMessage(ColorUtils.colorize(
+                    // Нашли пару с этим игроком
+                    UUID otherPlayerId = entry.player1Id.equals(playerId) ? entry.player2Id : entry.player1Id;
+                    Player otherPlayer = Bukkit.getPlayer(otherPlayerId);
+
+                    // Удаляем пару из очереди
+                    iterator.remove();
+
+                    // Возвращаем игроков
+                    returnPlayer(player, true);
+                    if (otherPlayer != null && otherPlayer.isOnline()) {
+                        returnPlayer(otherPlayer, true);
+                        otherPlayer.sendMessage(ColorUtils.colorize(
+                                plugin.getConfig().getString("messages.prefix") +
+                                        "&cПротивник отменил дуэль!"));
+                        otherPlayer.playSound(otherPlayer.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 1.0f, 0.5f);
+                    }
+
+                    // Сообщение об отмене
+                    player.sendMessage(ColorUtils.colorize(
                             plugin.getConfig().getString("messages.prefix") +
-                                    "&cПротивник отменил дуэль!"));
-                    otherPlayer.playSound(otherPlayer.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 1.0f, 0.5f);
-                }
+                                    "&aОжидание арены отменено!"));
+                    player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 1.0f, 0.5f);
 
-                // Сообщение об отмене
-                player.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                "&aОжидание арены отменено!"));
-                player.playSound(player.getLocation(), Sound.BLOCK_NOTE_BLOCK_BASS, 1.0f, 0.5f);
-                return;
+                    System.out.println("[DUEL-CANCEL] Ожидание арены успешно отменено");
+                    return;
+                }
             }
         }
 
-        // 5. Если игрок не найден ни в одной из проверок
+        // Если игрок не найден ни в одной из проверок
+        System.out.println("[DUEL-CANCEL] Игрок " + player.getName() + " не найден ни в одном состоянии дуэли");
         player.sendMessage(ColorUtils.colorize(
                 plugin.getConfig().getString("messages.prefix") +
                         "&cВы не участвуете в дуэли!"));
+    }
+
+    /**
+     * Проверяет, находится ли игрок в очереди на арену
+     */
+    private boolean isPlayerInArenaQueue(UUID playerId) {
+        for (QueueEntry entry : arenaQueue) {
+            if (entry.player1Id.equals(playerId) || entry.player2Id.equals(playerId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Проверяет, находится ли игрок в очереди на дуэль
+     */
+    public boolean isPlayerSearchingDuel(UUID playerId) {
+        for (DuelType type : DuelType.values()) {
+            if (queuedPlayers.get(type).contains(playerId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -3714,8 +3774,12 @@ public class DuelManager {
     }
 
     private void sendCancelButton(Player player) {
-        // Не отправляем кнопку, если игрок в активной дуэли
-        if (isPlayerInDuel(player.getUniqueId())) {
+        UUID playerId = player.getUniqueId();
+
+        // ВАЖНО: Изменено условие - не блокируем кнопку для игроков в поиске
+        // Блокируем только если игрок в активной дуэли и без отложенной задачи возврата
+        if (playerDuels.containsKey(playerId) && !hasDelayedReturnTask(playerId)) {
+            plugin.getLogger().info("[DEBUG] Не отправляем кнопку отмены игроку " + player.getName() + " (активная дуэль)");
             return;
         }
 
@@ -3723,7 +3787,7 @@ public class DuelManager {
         int cancelTime = plugin.getConfig().getInt("timers.cancel-time", 8);
 
         // Определяем, находится ли игрок в режиме поиска или уже на арене
-        boolean isOnArena = frozenPlayers.contains(player.getUniqueId());
+        boolean isOnArena = duelCountdownPlayers.contains(playerId);
 
         // Используем разные сообщения в зависимости от ситуации
         String messageKey;
@@ -3743,7 +3807,7 @@ public class DuelManager {
         String message = plugin.getConfig().getString(messageKey,
                 "&eДля отмены " + (isOnArena ? "дуэли" : "поиска") + " нажмите на кнопку ниже в течение &c" +
                         cancelTime + " &eсекунд.");
-// Заменяем %time% на фактическое время
+        // Заменяем %time% на фактическое время
         message = message.replace("%time%", String.valueOf(cancelTime));
 
         // Отправляем сообщение

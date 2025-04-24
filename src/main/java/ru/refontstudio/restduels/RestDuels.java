@@ -188,9 +188,6 @@ public final class RestDuels extends JavaPlugin {
                 player.removeMetadata("restduels_blocked_commands", this);
             }
 
-            // Отправляем сообщение игрокам
-            player.sendMessage(ColorUtils.colorize("&a[RestDuels] &eПлагин выключен, все ограничения сняты."));
-
             // Если есть CommandBlocker, очищаем его
             try {
                 if (commandBlocker != null) {

@@ -215,60 +215,30 @@ public class CommandBlocker implements Listener {
         }
     }
 
-    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlayerCommand(PlayerCommandPreprocessEvent event) {
         Player player = event.getPlayer();
-        UUID playerId = player.getUniqueId();
 
-        // ИЗМЕНЕНО: Добавлена проверка на наличие отложенной задачи возврата
-        // Если игрок находится в процессе сбора ресурсов после дуэли,
-        // не блокируем команды
-        if (plugin.getDuelManager().hasDelayedReturnTask(playerId)) {
-            return; // Разрешаем команду, если есть отложенная задача возврата
-        }
+        // Если игрок находится в списке заблокированных
+        if (blockedPlayers.contains(player.getUniqueId())) {
+            // Проверяем, находится ли игрок в поиске дуэли (а не в активной дуэли)
+            if (plugin.getDuelManager().isPlayerSearchingDuel(player.getUniqueId())) {
+                // Если в поиске, разрешаем команды
+                return;
+            }
 
-        // Проверяем состояние игрока
-        if (plugin.getDuelManager().isPlayerInDuel(playerId) ||
-                plugin.getDuelManager().isPlayerFrozen(playerId) ||
-                blockedPlayers.contains(playerId)) {
+            String command = event.getMessage().toLowerCase();
 
-            String command = event.getMessage().toLowerCase(); // Полная команда с аргументами
-
-            // Проверяем, разрешена ли команда
-            boolean allowed = false;
-
-            // Проверяем, разрешена ли команда
+            // Если команда разрешена, пропускаем
             if (isCommandAllowed(command)) {
-                allowed = true;
+                return;
             }
 
-            // Проверяем, является ли это командой досрочного возврата
-            if (command.startsWith("/duel return") || command.equals("/duel return")) {
-                // Разрешаем команду досрочного возврата
-                allowed = true;
-            }
-
-            // Проверяем, имеет ли игрок разрешение обходить блокировку
-            if (player.hasPermission("restduels.bypass.commandblock")) {
-                allowed = true;
-            }
-
-            // Если команда не разрешена, блокируем её
-            if (!allowed) {
-                // Отменяем событие
-                event.setCancelled(true);
-
-                // Отправляем сообщение игроку
-                player.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                plugin.getConfig().getString("messages.commands-blocked",
-                                        "&cВы не можете использовать команды во время дуэли!")));
-
-                // Логируем блокировку, если включена отладка
-                if (plugin.getConfig().getBoolean("debug", false)) {
-                    plugin.getLogger().info("Заблокирована команда " + command + " для игрока " + player.getName() + " во время дуэли");
-                }
-            }
+            // Отменяем выполнение команды
+            event.setCancelled(true);
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "&cВы не можете использовать команды во время дуэли!"));
         }
     }
 

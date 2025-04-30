@@ -80,24 +80,27 @@ public class ProtocolLibIntegration {
             @Override
             public void onPacketSending(PacketEvent event) {
                 Player player = event.getPlayer();
-
                 if (!mainPlugin.getDuelManager().isPlayerInDuel(player.getUniqueId())) return;
-
                 try {
                     String msg = event.getPacket().getStrings().read(0);
 
-                    // Блокируем любое текстовое сообщение
+                    // Добавляем проверку на сообщения о победе/поражении
                     if (msg != null && !msg.trim().isEmpty()) {
-                        event.setCancelled(true);
+                        // Не блокируем сообщения о победе/поражении
+                        if (msg.contains("победили в дуэли") || msg.contains("проиграли в дуэли") ||
+                                msg.contains("Поздравляем") || msg.contains("Вы победили") ||
+                                msg.contains("Время сбора ресурсов")) {
+                            return; // Пропускаем эти сообщения
+                        }
 
+                        event.setCancelled(true);
                         if (mainPlugin.getConfig().getBoolean("debug", false)) {
                             mainPlugin.getLogger().info("[ProtocolLib] Заблокировано сообщение: " + msg +
                                     " для игрока " + player.getName());
                         }
                     }
-
                 } catch (Exception ignored) {
-                    // На всякий случай не крашить, если что-то пошло не так
+                    // Игнорируем ошибки
                 }
             }
         });

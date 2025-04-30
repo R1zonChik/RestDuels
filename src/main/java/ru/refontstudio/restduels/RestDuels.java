@@ -12,6 +12,7 @@ import ru.refontstudio.restduels.commands.ArenaSetupCommand;
 import ru.refontstudio.restduels.commands.ArenaWandCommand;
 import ru.refontstudio.restduels.commands.DuelCommand;
 import ru.refontstudio.restduels.config.ConfigManager;
+import ru.refontstudio.restduels.integrations.ProtocolLibIntegration;
 import ru.refontstudio.restduels.listeners.*;
 import ru.refontstudio.restduels.managers.*;
 import ru.refontstudio.restduels.utils.ColorUtils;
@@ -109,6 +110,14 @@ public final class RestDuels extends JavaPlugin {
             });
         }
 
+        // Инициализация интеграций
+        setupIntegrations();
+
+        // В методе onEnable() добавьте:
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            setupIntegrations();
+        }, 20L); // Задержка в 1 секунду для надежной загрузки ProtocolLib
+
         // Инициализируем менеджеры
         this.configManager = new ConfigManager(this);
         this.statsManager = new StatsManager(this);
@@ -174,6 +183,23 @@ public final class RestDuels extends JavaPlugin {
     // Добавляем геттер для доступа к защитнику арены из других классов
     public ArenaGuardian getArenaGuardian() {
         return arenaGuardian;
+    }
+
+    // Добавьте этот метод в класс RestDuels
+    private void setupIntegrations() {
+        // Проверка наличия ProtocolLib
+        if (getServer().getPluginManager().getPlugin("ProtocolLib") != null) {
+            try {
+                // Инициализация интеграции
+                new ProtocolLibIntegration(this, commandBlocker);
+                getLogger().info("ProtocolLib интеграция успешно загружена!");
+            } catch (Exception e) {
+                getLogger().warning("Не удалось инициализировать ProtocolLib: " + e.getMessage());
+                e.printStackTrace();
+            }
+        } else {
+            getLogger().warning("ProtocolLib не найден! Некоторые функции будут недоступны.");
+        }
     }
 
     @Override

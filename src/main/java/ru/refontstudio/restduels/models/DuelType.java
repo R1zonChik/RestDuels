@@ -2,7 +2,8 @@ package ru.refontstudio.restduels.models;
 
 public enum DuelType {
     NORMAL("Обычная дуэль", "Инвентарь выпадает"),
-    RANKED("Дуэль без потерь", "Инвентарь сохраняется"); // Переименовал второй режим
+    RANKED("Дуэль без потерь", "Инвентарь сохраняется"),
+    CLASSIC("Классическая дуэль", "Инвентарь выпадает"); // Добавлен новый тип
 
     private final String name;
     private final String description;

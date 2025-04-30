@@ -104,7 +104,7 @@ public class DuelWorldGuardian implements Listener {
         if (to != null && isInDuelWorld(to.getWorld())) {
             UUID playerId = player.getUniqueId();
 
-            // ИСПРАВЛЕНО: Проверяем разрешение на телепортацию
+            // ИСПРАВЛЕНО: Проверяем разрешение на телепортацию, включая отложенную задачу возврата
             if (canTeleportToDuelWorld(player)) {
                 return; // Разрешаем телепортацию
             }
@@ -118,7 +118,7 @@ public class DuelWorldGuardian implements Listener {
     }
 
     /**
-     * ДОБАВЛЕНО: Проверяет, может ли игрок телепортироваться в мир дуэлей
+     * Проверяет, может ли игрок телепортироваться в мир дуэлей
      * @param player Игрок для проверки
      * @return true, если игрок может телепортироваться
      */
@@ -139,14 +139,14 @@ public class DuelWorldGuardian implements Listener {
             return true;
         }
 
-        // ИСПРАВЛЕНО: Игроки в процессе подготовки (отсчет) могут телепортироваться
+        // Игроки в процессе подготовки (отсчет) могут телепортироваться
         if (plugin.getDuelManager().isPlayerInCountdown(playerId)) {
             plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
                     " разрешена телепортация в мир дуэлей: игрок в процессе подготовки");
             return true;
         }
 
-        // ИСПРАВЛЕНО: Игроки в очереди могут телепортироваться
+        // Игроки в очереди могут телепортироваться
         if (plugin.getDuelManager().isPlayerInQueue(playerId)) {
             plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
                     " разрешена телепортация в мир дуэлей: игрок в очереди на дуэль");
@@ -157,6 +157,14 @@ public class DuelWorldGuardian implements Listener {
         if (plugin.getDuelManager().isPlayerFrozen(playerId)) {
             plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
                     " разрешена телепортация в мир дуэлей: игрок заморожен");
+            return true;
+        }
+
+        // ДОБАВЛЕНО: Проверяем, есть ли у игрока отложенная задача возврата
+        // Это означает, что дуэль закончилась, но у игрока есть время на сбор предметов
+        if (plugin.getDuelManager().hasDelayedReturnTask(playerId)) {
+            plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
+                    " разрешена телепортация в мир дуэлей: у игрока есть время на сбор предметов");
             return true;
         }
 
@@ -207,10 +215,10 @@ public class DuelWorldGuardian implements Listener {
             return;
         }
 
-        // ИСПРАВЛЕНО: Проверяем все возможные состояния игрока
+        // ИСПРАВЛЕНО: Проверяем все возможные состояния игрока, включая отложенную задачу возврата
         if (!canTeleportToDuelWorld(player)) {
-            // Игрок не в дуэли, не в подготовке, не в очереди и не заморожен, но находится в мире дуэлей
-            // Телепортируем на последнюю сохраненную локацию
+            // Игрок не в дуэли, не в подготовке, не в очереди, не заморожен и не имеет времени на сбор предметов,
+            // но находится в мире дуэлей - телепортируем на последнюю сохраненную локацию
             if (plugin.getDuelManager().hasSavedLocation(playerId)) {
                 Bukkit.getScheduler().runTaskLater(plugin, () -> {
                     plugin.getDuelManager().teleportToSavedLocation(player);

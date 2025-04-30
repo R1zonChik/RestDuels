@@ -1,5 +1,8 @@
 package ru.refontstudio.restduels.managers;
 
+import org.bukkit.boss.BossBar;
+import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
 import net.md_5.bungee.api.ChatMessageType;
 import net.md_5.bungee.api.chat.ClickEvent;
 import net.md_5.bungee.api.chat.ComponentBuilder;
@@ -7,6 +10,8 @@ import net.md_5.bungee.api.chat.HoverEvent;
 import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.*;
 import org.bukkit.block.Block;
+import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.*;
@@ -54,6 +59,7 @@ public class DuelManager {
     private final Map<UUID, ItemStack[]> playerArmor = new HashMap<>();
     private Map<UUID, Float> playerOriginalSpeeds = new HashMap<>();
     private final Map<DuelType, List<UUID>> queuedPlayers = new HashMap<>();
+    public final Map<UUID, BossBar> playerBossBars = new HashMap<>();
     private final Map<UUID, BukkitTask> searchTasks = new HashMap<>();
     private final Map<UUID, BukkitTask> delayedReturnTasks = new HashMap<>();
     private final Map<UUID, Arena> playerArenas = new HashMap<>();
@@ -102,6 +108,96 @@ public class DuelManager {
         }
 
         return true;
+    }
+
+    /**
+     * Запускает таймер с отображением времени в BossBar
+     * @param player1 Первый игрок
+     * @param player2 Второй игрок
+     * @param duel Дуэль
+     * @param duelTimeSeconds Время дуэли в секундах
+     */
+    private void startBossBarTimer(Player player1, Player player2, Duel duel, int duelTimeSeconds) {
+        // Создаем BossBar с начальным текстом и цветом
+        BossBar bossBar = Bukkit.createBossBar(
+                ColorUtils.colorize("&6Осталось времени: &e" + formatTime(duelTimeSeconds)),
+                BarColor.YELLOW,
+                BarStyle.SOLID);
+
+        // Добавляем игроков к BossBar
+        bossBar.addPlayer(player1);
+        bossBar.addPlayer(player2);
+
+        // Сохраняем BossBar для обоих игроков
+        playerBossBars.put(player1.getUniqueId(), bossBar);
+        playerBossBars.put(player2.getUniqueId(), bossBar);
+
+        // Сохраняем исходное время для расчета прогресса
+        final int startTime = duelTimeSeconds;
+        final int[] timeLeft = {duelTimeSeconds};
+
+        // Запускаем таймер
+        BukkitTask task = Bukkit.getScheduler().runTaskTimer(plugin, new Runnable() {
+            @Override
+            public void run() {
+                // Проверяем, активна ли еще дуэль
+                if (!isPlayerInDuel(player1.getUniqueId()) || !isPlayerInDuel(player2.getUniqueId())) {
+                    bossBar.removeAll();
+                    playerBossBars.remove(player1.getUniqueId());
+                    playerBossBars.remove(player2.getUniqueId());
+                    if (duel.getTimerTask() != null) {
+                        duel.getTimerTask().cancel();
+                    }
+                    return;
+                }
+
+                // Обновляем оставшееся время
+                timeLeft[0]--;
+
+                if (timeLeft[0] <= 0) {
+                    // Время вышло, завершаем дуэль
+                    bossBar.removeAll();
+                    playerBossBars.remove(player1.getUniqueId());
+                    playerBossBars.remove(player2.getUniqueId());
+
+                    if (duel.getTimerTask() != null) {
+                        duel.getTimerTask().cancel();
+                    }
+
+                    // Объявляем ничью
+                    endDuelAsDraw(duel);
+                    return;
+                }
+
+                // Обновляем заголовок BossBar
+                bossBar.setTitle(ColorUtils.colorize("&6Осталось времени: &e" + formatTime(timeLeft[0])));
+
+                // Обновляем прогресс BossBar
+                double progress = (double) timeLeft[0] / startTime;
+                bossBar.setProgress(Math.max(0.0, Math.min(1.0, progress)));
+
+                // Меняем цвет в зависимости от оставшегося времени
+                if (timeLeft[0] <= 30) {
+                    bossBar.setColor(BarColor.RED);
+                } else if (timeLeft[0] <= 60) {
+                    bossBar.setColor(BarColor.YELLOW);
+                }
+            }
+        }, 0L, 20L); // Обновление каждую секунду
+
+        // Сохраняем задачу таймера в объекте дуэли
+        duel.setTimerTask(task);
+    }
+
+    /**
+     * Форматирует время в формате MM:SS
+     * @param seconds Время в секундах
+     * @return Отформатированное время
+     */
+    private String formatTime(int seconds) {
+        int minutes = seconds / 60;
+        int secs = seconds % 60;
+        return String.format("%02d:%02d", minutes, secs);
     }
 
     /**
@@ -1100,13 +1196,19 @@ public class DuelManager {
     }
 
     private void freezePlayersBeforeDuel(Player player1, Player player2, DuelType type, Arena arena) {
-        // Сохраняем локации игроков, если они еще не сохранены
+        // Сохраняем локации игроков
         saveOriginalLocation(player1);
         saveOriginalLocation(player2);
 
-        // Добавляем обоих игроков в список подготовки
+        // Добавляем игроков в список подготовки ПЕРЕД телепортацией
         duelCountdownPlayers.add(player1.getUniqueId());
         duelCountdownPlayers.add(player2.getUniqueId());
+
+        // Создаем временную "дуэль" для обоих игроков, чтобы они считались "в дуэли"
+        // Это нужно только для проверки телепортации, реальная дуэль будет создана позже
+        Duel tempDuel = new Duel(player1.getUniqueId(), player2.getUniqueId(), type, arena);
+        playerDuels.put(player1.getUniqueId(), tempDuel);
+        playerDuels.put(player2.getUniqueId(), tempDuel);
 
         // Сохраняем статус полета и отключаем его
         playerFlightStatus.put(player1.getUniqueId(), player1.getAllowFlight());
@@ -1118,47 +1220,45 @@ public class DuelManager {
         player2.setAllowFlight(false);
         player2.setFlying(false);
 
-        // Сохраняем оригинальную скорость и устанавливаем ускорение
+        // Сохраняем оригинальную скорость
         float base1 = player1.getWalkSpeed();
         float base2 = player2.getWalkSpeed();
         originalWalkSpeed.put(player1.getUniqueId(), base1);
         originalWalkSpeed.put(player2.getUniqueId(), base2);
 
+        // ОТЛАДКА: Логи для отслеживания скорости
+        plugin.getLogger().info("[DEBUG] Сохранена скорость для игрока " + player1.getName() + ": " + base1);
+        plugin.getLogger().info("[DEBUG] Сохранена скорость для игрока " + player2.getName() + ": " + base2);
+
         // Устанавливаем скорость в 2 раза больше текущей, но не более 1.0
         float newSpeed1 = Math.min(base1 * 2, 1.0f);
         float newSpeed2 = Math.min(base2 * 2, 1.0f);
+
+        // ИСПРАВЛЕНО: Проверяем, что новая скорость не меньше минимальной скорости
+        if (newSpeed1 < 0.2f) newSpeed1 = 0.2f;
+        if (newSpeed2 < 0.2f) newSpeed2 = 0.2f;
+
+        // ОТЛАДКА: Логи для отслеживания новой скорости
+        plugin.getLogger().info("[DEBUG] Новая скорость для игрока " + player1.getName() + ": " + newSpeed1);
+        plugin.getLogger().info("[DEBUG] Новая скорость для игрока " + player2.getName() + ": " + newSpeed2);
+
+        // Устанавливаем новую скорость для обоих игроков
         player1.setWalkSpeed(newSpeed1);
         player2.setWalkSpeed(newSpeed2);
 
-        // ИСПРАВЛЕНИЕ: Добавляем игроков в список для телепортации
-        pendingTeleports.add(player1.getUniqueId());
-        pendingTeleports.add(player2.getUniqueId());
-
-        // Телепортируем первого игрока
+        // Телепортируем игроков на арену
         plugin.getLogger().info("[DEBUG] Телепортация игрока " + player1.getName() + " на спавн 1");
         safeTeleport(player1, arena.getSpawn1());
 
-        // Телепортируем второго игрока с небольшой задержкой
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (player2 != null && player2.isOnline()) {
-                pendingTeleports.add(player2.getUniqueId());
-                plugin.getLogger().info("[DEBUG] Телепортация игрока " + player2.getName() + " на спавн 2");
-                safeTeleport(player2, arena.getSpawn2());
-                player2.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                "&aТелепортация на арену завершена. Подготовка к дуэли..."));
+        plugin.getLogger().info("[DEBUG] Телепортация игрока " + player2.getName() + " на спавн 2");
+        safeTeleport(player2, arena.getSpawn2());
 
-                // Удаляем игрока из списка ожидающих телепортацию
-                Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                    pendingTeleports.remove(player2.getUniqueId());
-                }, 5L);
-            }
-        }, 5L); // 5 тиков = 0.25 секунды
-
-        // Удаляем первого игрока из списка ожидающих телепортацию
+        // Удаляем временную дуэль после телепортации
+        // Реальная дуэль будет создана после отсчета
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            pendingTeleports.remove(player1.getUniqueId());
-        }, 5L);
+            playerDuels.remove(player1.getUniqueId());
+            playerDuels.remove(player2.getUniqueId());
+        }, 20L); // 1 секунда
 
         // Оптимизация: очистка инвентаря перед дуэлью для уменьшения объема данных
         if (plugin.getConfig().getBoolean("optimization.clean-inventory-before-duel", false)) {
@@ -1193,14 +1293,21 @@ public class DuelManager {
     private void unfreezePlayer(Player player) {
         UUID uuid = player.getUniqueId();
 
+        // ОТЛАДКА: Логируем начало разморозки
+        plugin.getLogger().info("[DEBUG] Разморозка игрока " + player.getName());
+
         // Восстанавливаем исходную скорость ходьбы
         if (originalWalkSpeed.containsKey(uuid)) {
             float originalSpeed = originalWalkSpeed.get(uuid);
             player.setWalkSpeed(originalSpeed);
+            plugin.getLogger().info("[DEBUG] Восстановлена скорость " + originalSpeed +
+                    " для игрока " + player.getName());
             originalWalkSpeed.remove(uuid);
         } else {
             // Если сохраненная скорость не найдена, устанавливаем стандартную
             player.setWalkSpeed(0.2f);
+            plugin.getLogger().info("[DEBUG] Установлена стандартная скорость 0.2 для игрока " +
+                    player.getName() + " (сохраненная не найдена)");
         }
 
         // Восстанавливаем статус полёта
@@ -1210,12 +1317,17 @@ public class DuelManager {
             // Если полет был разрешен, включаем его
             if (allowFlight) {
                 player.setFlying(allowFlight);
+                plugin.getLogger().info("[DEBUG] Восстановлен полет для игрока " + player.getName());
             }
             playerFlightStatus.remove(uuid);
+        } else {
+            plugin.getLogger().info("[DEBUG] Статус полета не был сохранен для игрока " + player.getName());
         }
 
         // Удаляем игрока из списка подготовки
-        duelCountdownPlayers.remove(uuid);
+        boolean wasInCountdown = duelCountdownPlayers.remove(uuid);
+        plugin.getLogger().info("[DEBUG] Игрок " + player.getName() +
+                (wasInCountdown ? " удален из списка подготовки" : " не был в списке подготовки"));
     }
 
     public void unfreezeAndCancelDuel(Player player) {
@@ -1499,6 +1611,7 @@ public class DuelManager {
                     // Один из игроков вышел или был удален из списка - отменяем отсчет
                     if (taskId[0] != -1) {
                         Bukkit.getScheduler().cancelTask(taskId[0]);
+                        plugin.getLogger().info("[DEBUG] Отсчет отменен: игрок вышел или удален из списка");
                     }
 
                     // Определяем, кто остался онлайн
@@ -1509,7 +1622,9 @@ public class DuelManager {
                         duelCountdownPlayers.remove(player1.getUniqueId());
                         // Восстанавливаем скорость
                         if (originalWalkSpeed.containsKey(player1.getUniqueId())) {
-                            player1.setWalkSpeed(originalWalkSpeed.get(player1.getUniqueId()));
+                            float origSpeed = originalWalkSpeed.get(player1.getUniqueId());
+                            player1.setWalkSpeed(origSpeed);
+                            plugin.getLogger().info("[DEBUG] Восстановлена скорость игрока " + player1.getName() + " к " + origSpeed);
                             originalWalkSpeed.remove(player1.getUniqueId());
                         }
                     } else if (player2.isOnline() && duelCountdownPlayers.contains(player2.getUniqueId())) {
@@ -1517,7 +1632,9 @@ public class DuelManager {
                         duelCountdownPlayers.remove(player2.getUniqueId());
                         // Восстанавливаем скорость
                         if (originalWalkSpeed.containsKey(player2.getUniqueId())) {
-                            player2.setWalkSpeed(originalWalkSpeed.get(player2.getUniqueId()));
+                            float origSpeed = originalWalkSpeed.get(player2.getUniqueId());
+                            player2.setWalkSpeed(origSpeed);
+                            plugin.getLogger().info("[DEBUG] Восстановлена скорость игрока " + player2.getName() + " к " + origSpeed);
                             originalWalkSpeed.remove(player2.getUniqueId());
                         }
                     }
@@ -1539,6 +1656,7 @@ public class DuelManager {
                     // Освобождаем арену
                     if (arena != null) {
                         occupiedArenas.remove(arena.getId());
+                        plugin.getLogger().info("[DEBUG] Арена " + arena.getId() + " освобождена из-за отмены отсчета");
                     }
 
                     return;
@@ -1553,21 +1671,43 @@ public class DuelManager {
                         // Отменяем текущую задачу отсчета
                         if (taskId[0] != -1) {
                             Bukkit.getScheduler().cancelTask(taskId[0]);
+                            plugin.getLogger().info("[DEBUG] Отсчет завершен, начинаем дуэль");
                         }
 
-                        // Восстанавливаем нормальную скорость для обоих игроков
-                        if (originalWalkSpeed.containsKey(player1.getUniqueId())) {
-                            player1.setWalkSpeed(originalWalkSpeed.get(player1.getUniqueId()));
-                            originalWalkSpeed.remove(player1.getUniqueId());
+                        // ИСПРАВЛЕНО: Восстанавливаем нормальную скорость для обоих игроков
+                        UUID player1Id = player1.getUniqueId();
+                        UUID player2Id = player2.getUniqueId();
+
+                        if (originalWalkSpeed.containsKey(player1Id)) {
+                            float origSpeed1 = originalWalkSpeed.get(player1Id);
+                            player1.setWalkSpeed(origSpeed1);
+                            plugin.getLogger().info("[DEBUG] Восстановлена скорость игрока " +
+                                    player1.getName() + " к " + origSpeed1);
+                            originalWalkSpeed.remove(player1Id);
+                        } else {
+                            // Если не найдена сохраненная скорость, устанавливаем стандартную
+                            player1.setWalkSpeed(0.2f);
+                            plugin.getLogger().info("[DEBUG] Установлена стандартная скорость для игрока " +
+                                    player1.getName() + " (0.2)");
                         }
-                        if (originalWalkSpeed.containsKey(player2.getUniqueId())) {
-                            player2.setWalkSpeed(originalWalkSpeed.get(player2.getUniqueId()));
-                            originalWalkSpeed.remove(player2.getUniqueId());
+
+                        if (originalWalkSpeed.containsKey(player2Id)) {
+                            float origSpeed2 = originalWalkSpeed.get(player2Id);
+                            player2.setWalkSpeed(origSpeed2);
+                            plugin.getLogger().info("[DEBUG] Восстановлена скорость игрока " +
+                                    player2.getName() + " к " + origSpeed2);
+                            originalWalkSpeed.remove(player2Id);
+                        } else {
+                            // Если не найдена сохраненная скорость, устанавливаем стандартную
+                            player2.setWalkSpeed(0.2f);
+                            plugin.getLogger().info("[DEBUG] Установлена стандартная скорость для игрока " +
+                                    player2.getName() + " (0.2)");
                         }
 
                         // ИСПРАВЛЕНО: Телепортируем игроков обратно на их начальные позиции
                         safeTeleport(player1, arena.getSpawn1());
                         safeTeleport(player2, arena.getSpawn2());
+                        plugin.getLogger().info("[DEBUG] Игроки телепортированы на начальные позиции арены");
 
                         // Удаляем игроков из списка отсчета
                         duelCountdownPlayers.remove(player1.getUniqueId());
@@ -1580,6 +1720,7 @@ public class DuelManager {
                         // Отменяем текущую задачу отсчета
                         if (taskId[0] != -1) {
                             Bukkit.getScheduler().cancelTask(taskId[0]);
+                            plugin.getLogger().info("[DEBUG] Игрок вышел в последний момент отсчета");
                         }
 
                         // Определяем, кто остался онлайн
@@ -1590,7 +1731,9 @@ public class DuelManager {
                             duelCountdownPlayers.remove(player1.getUniqueId());
                             // Восстанавливаем скорость
                             if (originalWalkSpeed.containsKey(player1.getUniqueId())) {
-                                player1.setWalkSpeed(originalWalkSpeed.get(player1.getUniqueId()));
+                                float origSpeed = originalWalkSpeed.get(player1.getUniqueId());
+                                player1.setWalkSpeed(origSpeed);
+                                plugin.getLogger().info("[DEBUG] Восстановлена скорость игрока " + player1.getName() + " к " + origSpeed);
                                 originalWalkSpeed.remove(player1.getUniqueId());
                             }
                         } else if (player2.isOnline() && duelCountdownPlayers.contains(player2.getUniqueId())) {
@@ -1598,7 +1741,9 @@ public class DuelManager {
                             duelCountdownPlayers.remove(player2.getUniqueId());
                             // Восстанавливаем скорость
                             if (originalWalkSpeed.containsKey(player2.getUniqueId())) {
-                                player2.setWalkSpeed(originalWalkSpeed.get(player2.getUniqueId()));
+                                float origSpeed = originalWalkSpeed.get(player2.getUniqueId());
+                                player2.setWalkSpeed(origSpeed);
+                                plugin.getLogger().info("[DEBUG] Восстановлена скорость игрока " + player2.getName() + " к " + origSpeed);
                                 originalWalkSpeed.remove(player2.getUniqueId());
                             }
                         }
@@ -1620,6 +1765,7 @@ public class DuelManager {
                         // Освобождаем арену
                         if (arena != null) {
                             occupiedArenas.remove(arena.getId());
+                            plugin.getLogger().info("[DEBUG] Арена " + arena.getId() + " освобождена из-за выхода игрока");
                         }
                     }
 
@@ -1666,6 +1812,9 @@ public class DuelManager {
                     player2.playSound(player2.getLocation(), countSound, 1.0f, pitch);
                 }
 
+                // ОТЛАДКА: Логируем текущее состояние отсчета
+                plugin.getLogger().info("[DEBUG] Отсчет: " + countdown[0]);
+
                 // Уменьшаем счетчик
                 countdown[0]--;
             }
@@ -1673,6 +1822,7 @@ public class DuelManager {
 
         // Сохраняем ID задачи
         taskId[0] = countdownTask.getTaskId();
+        plugin.getLogger().info("[DEBUG] Запущен отсчет с ID задачи: " + taskId[0]);
     }
 
     // Добавь этот метод в класс DuelManager
@@ -1692,6 +1842,9 @@ public class DuelManager {
     /**
      * Метод для начала дуэли с автоматическим восстановлением арены
      */
+    /**
+     * Метод для начала дуэли с автоматическим восстановлением арены
+     */
     public void startDuel(Player player1, Player player2, DuelType type, Arena arena) {
         if (arena == null) {
             player1.sendMessage(ChatColor.RED + "Нет доступных арен для дуэли!");
@@ -1708,7 +1861,6 @@ public class DuelManager {
         // Восстанавливаем арену при входе игроков
         restoreArenaWhenPlayersEnter(arena);
 
-
         // Проверяем, включена ли опция отключения режима бога
         if (plugin.getConfig().getBoolean("godmode.disable-during-duel", true)) {
             // Отключаем режим бога у игроков, если он включен
@@ -1716,18 +1868,18 @@ public class DuelManager {
             disableGodModeIfEnabled(player2);
         }
 
-// Создаем дуэль
+        // Создаем дуэль
         Duel duel = new Duel(player1.getUniqueId(), player2.getUniqueId(), type, arena);
 
-// Регистрируем дуэль
+        // Регистрируем дуэль
         playerDuels.put(player1.getUniqueId(), duel);
         playerDuels.put(player2.getUniqueId(), duel);
 
-// Отправляем сообщение с кнопкой отмены дуэли
+        // Отправляем сообщение с кнопкой отмены дуэли
         sendCancelButton(player1);
         sendCancelButton(player2);
 
-// Запускаем проверку полета для обоих игроков
+        // Запускаем проверку полета для обоих игроков
         startFlightCheck(player1);
         startFlightCheck(player2);
 
@@ -1748,50 +1900,8 @@ public class DuelManager {
         int duelTimeMinutes = plugin.getConfig().getInt("timers.duel-time", 20);
         int duelTimeSeconds = duelTimeMinutes * 60; // в секундах
 
-        // Создаем отдельную задачу для отображения таймера
-        BukkitTask timerTask = Bukkit.getScheduler().runTaskTimer(plugin, new Runnable() {
-            private int timeLeft = duelTimeSeconds;
-
-            @Override
-            public void run() {
-                // Проверяем, что дуэль все еще активна
-                if (!isPlayerInDuel(player1.getUniqueId()) || !isPlayerInDuel(player2.getUniqueId())) {
-                    // Дуэль завершена, отменяем таймер
-                    if (duel.getTimerTask() != null) {
-                        duel.getTimerTask().cancel();
-                    }
-                    return;
-                }
-
-                // Форматируем оставшееся время
-                int minutes = timeLeft / 60;
-                int seconds = timeLeft % 60;
-                String timeString = String.format("%02d:%02d", minutes, seconds);
-
-                // Отображаем таймер игрокам
-                if (player1.isOnline()) {
-                    player1.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                            TextComponent.fromLegacyText(ColorUtils.colorize("&6Осталось времени: &e" + timeString)));
-                }
-
-                if (player2.isOnline()) {
-                    player2.spigot().sendMessage(ChatMessageType.ACTION_BAR,
-                            TextComponent.fromLegacyText(ColorUtils.colorize("&6Осталось времени: &e" + timeString)));
-                }
-
-                // Уменьшаем счетчик
-                timeLeft--;
-
-                // Если время вышло, отменяем таймер (основная задача завершения будет выполнена отдельно)
-                if (timeLeft < 0) {
-                    if (duel.getTimerTask() != null) {
-                        duel.getTimerTask().cancel();
-                    }
-                }
-            }
-        }, 0L, 20L); // Обновляем каждую секунду
-
-        duel.setTimerTask(timerTask);
+        // ИЗМЕНЕНО: Вместо ActionBar используем BossBar для отображения таймера
+        startBossBarTimer(player1, player2, duel, duelTimeSeconds);
 
         // Основная задача для завершения дуэли по времени
         BukkitTask duelTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
@@ -1824,8 +1934,160 @@ public class DuelManager {
         duel.setDuelTask(duelTask);
     }
 
+    /**
+     * Планирует отложенный возврат игрока
+     * @param player Игрок для возврата
+     * @param delaySeconds Задержка в секундах
+     */
+    private void scheduleDelayedReturn(Player player, int delaySeconds) {
+        if (player == null || !player.isOnline()) return;
+
+        UUID playerId = player.getUniqueId();
+
+        // Отменяем существующую задачу, если она есть
+        if (delayedReturnTasks.containsKey(playerId)) {
+            delayedReturnTasks.get(playerId).cancel();
+        }
+
+        // Создаем новую задачу
+        BukkitTask task = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (player.isOnline()) {
+                returnPlayer(player, true);
+                player.sendMessage(ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") +
+                                "&aВы были возвращены на исходную позицию."));
+            }
+            delayedReturnTasks.remove(playerId);
+        }, delaySeconds * 20L); // Преобразуем секунды в тики (20 тиков = 1 секунда)
+
+        // Сохраняем задачу
+        delayedReturnTasks.put(playerId, task);
+    }
+
+    /**
+     * Завершает дуэль с указанием победителя
+     * @param duel Дуэль
+     * @param winnerId UUID победителя
+     */
     public void endDuel(Duel duel, UUID winnerId) {
-        endDuel(duel, winnerId, false);
+        // Получаем ID игроков
+        UUID player1Id = duel.getPlayer1Id();
+        UUID player2Id = duel.getPlayer2Id();
+
+        // Получаем игроков (если они онлайн)
+        Player player1 = Bukkit.getPlayer(player1Id);
+        Player player2 = Bukkit.getPlayer(player2Id);
+
+        // Определяем победителя и проигравшего
+        UUID loserId = winnerId.equals(player1Id) ? player2Id : player1Id;
+        Player winner = winnerId.equals(player1Id) ? player1 : player2;
+        Player loser = winnerId.equals(player1Id) ? player2 : player1;
+
+        // Обновляем статистику
+        plugin.getStatsManager().incrementWins(winnerId);
+        plugin.getStatsManager().incrementDeaths(loserId);
+
+        // Отправляем сообщение о результате дуэли
+        if (winner != null && winner.isOnline()) {
+            winner.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            plugin.getConfig().getString("messages.duel-win")));
+            winner.playSound(winner.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
+            plugin.getTitleManager().sendTitle(winner, "duel-win");
+        }
+
+        if (loser != null && loser.isOnline()) {
+            loser.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            plugin.getConfig().getString("messages.duel-lose")));
+            loser.playSound(loser.getLocation(), Sound.ENTITY_WITHER_DEATH, 1.0f, 1.0f);
+            plugin.getTitleManager().sendTitle(loser, "duel-lose");
+        }
+
+        // ДОБАВЛЕНО: Удаляем BossBar
+        if (playerBossBars.containsKey(player1Id)) {
+            BossBar bossBar = playerBossBars.get(player1Id);
+            bossBar.removeAll();
+            playerBossBars.remove(player1Id);
+            playerBossBars.remove(player2Id);
+        }
+
+        // Отменяем таймер дуэли
+        if (duel.getTimerTask() != null) {
+            duel.getTimerTask().cancel();
+        }
+
+        // Удаляем дуэль из списка активных дуэлей
+        playerDuels.remove(player1Id);
+        playerDuels.remove(player2Id);
+
+        // Освобождаем арену
+        occupiedArenas.remove(duel.getArena().getId());
+
+        // Проверяем очередь на арену
+        checkArenaQueue();
+
+        // Телепортируем игроков обратно с задержкой
+        scheduleDelayedReturn(player1, 5);
+        scheduleDelayedReturn(player2, 5);
+    }
+
+    /**
+     * Завершает дуэль как ничью
+     * @param duel Дуэль
+     */
+    private void endDuelAsDraw(Duel duel) {
+        // Получаем ID игроков
+        UUID player1Id = duel.getPlayer1Id();
+        UUID player2Id = duel.getPlayer2Id();
+
+        // Получаем игроков (если они онлайн)
+        Player player1 = Bukkit.getPlayer(player1Id);
+        Player player2 = Bukkit.getPlayer(player2Id);
+
+        // Отправляем сообщение о ничьей
+        String drawMessage = ColorUtils.colorize(
+                plugin.getConfig().getString("messages.prefix") +
+                        "&eВремя вышло! Дуэль завершилась ничьей.");
+
+        if (player1 != null && player1.isOnline()) {
+            player1.sendMessage(drawMessage);
+            player1.playSound(player1.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.5f, 0.8f);
+            plugin.getTitleManager().sendTitle(player1, "duel-draw");
+        }
+
+        if (player2 != null && player2.isOnline()) {
+            player2.sendMessage(drawMessage);
+            player2.playSound(player2.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.5f, 0.8f);
+            plugin.getTitleManager().sendTitle(player2, "duel-draw");
+        }
+
+        // ДОБАВЛЕНО: Удаляем BossBar
+        if (playerBossBars.containsKey(player1Id)) {
+            BossBar bossBar = playerBossBars.get(player1Id);
+            bossBar.removeAll();
+            playerBossBars.remove(player1Id);
+            playerBossBars.remove(player2Id);
+        }
+
+        // Отменяем таймер дуэли
+        if (duel.getTimerTask() != null) {
+            duel.getTimerTask().cancel();
+        }
+
+        // Удаляем дуэль из списка активных дуэлей
+        playerDuels.remove(player1Id);
+        playerDuels.remove(player2Id);
+
+        // Освобождаем арену
+        occupiedArenas.remove(duel.getArena().getId());
+
+        // Проверяем очередь на арену
+        checkArenaQueue();
+
+        // Телепортируем игроков обратно с задержкой
+        scheduleDelayedReturn(player1, 5);
+        scheduleDelayedReturn(player2, 5);
     }
 
     /**
@@ -3776,11 +4038,29 @@ public class DuelManager {
     private void sendCancelButton(Player player) {
         UUID playerId = player.getUniqueId();
 
-        // ВАЖНО: Изменено условие - не блокируем кнопку для игроков в поиске
-        // Блокируем только если игрок в активной дуэли и без отложенной задачи возврата
+        // ИСПРАВЛЕНО: Добавлены дополнительные проверки
+        // 1. Не отправляем кнопку, если игрок в активной дуэли
         if (playerDuels.containsKey(playerId) && !hasDelayedReturnTask(playerId)) {
             plugin.getLogger().info("[DEBUG] Не отправляем кнопку отмены игроку " + player.getName() + " (активная дуэль)");
             return;
+        }
+
+        // 2. Проверяем, не закончился ли отсчет
+        // Если отсчет закончился (игрок все еще в duelCountdownPlayers, но дуэль вот-вот начнется)
+        // это можно определить по наличию задачи таймера отсчета
+        if (duelCountdownPlayers.contains(playerId)) {
+            // Получаем текущее время
+            long now = System.currentTimeMillis();
+
+            // Получаем время отмены из конфига (в секундах)
+            int cancelTime = plugin.getConfig().getInt("timers.cancel-time", 8);
+
+            // Проверяем, не истекло ли время отмены
+            // Если дуэль вот-вот начнется (осталось менее 1 секунды), не показываем кнопку
+            if (cancelTime <= 1) {
+                plugin.getLogger().info("[DEBUG] Не отправляем кнопку отмены игроку " + player.getName() + " (отсчет завершается)");
+                return;
+            }
         }
 
         // Получаем время отмены из конфига

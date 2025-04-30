@@ -12,11 +12,13 @@ import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.scheduler.BukkitRunnable;
 import ru.refontstudio.restduels.RestDuels;
+import ru.refontstudio.restduels.models.DuelType;
 import ru.refontstudio.restduels.utils.ColorUtils;
 
 import java.util.*;
 
 public class DuelWorldGuardian implements Listener {
+
     private final Map<UUID, Long> recentDeaths = new HashMap<>();
     private final RestDuels plugin;
     private final Set<UUID> pendingTeleports = new HashSet<>();
@@ -55,10 +57,7 @@ public class DuelWorldGuardian implements Listener {
         // Проверяем, находится ли игрок в мире дуэлей
         if (isInDuelWorld(player)) {
             // Проверяем, участвует ли игрок в дуэли или в процессе начала дуэли
-            if (!plugin.getDuelManager().isPlayerInDuel(playerId) &&
-                    !plugin.getDuelManager().isPlayerFrozen(playerId) &&
-                    !plugin.getDuelManager().isPlayerInQueue(playerId)) {
-
+            if (!canTeleportToDuelWorld(player)) {
                 // Игрок не в дуэли, не заморожен и не в очереди, но находится в мире дуэлей
                 // Телепортируем на последнюю сохраненную локацию
                 if (plugin.getDuelManager().hasSavedLocation(playerId)) {
@@ -99,55 +98,72 @@ public class DuelWorldGuardian implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlayerTeleport(PlayerTeleportEvent event) {
         Player player = event.getPlayer();
+        Location to = event.getTo();
+
+        // Проверяем, телепортируется ли игрок в мир дуэлей
+        if (to != null && isInDuelWorld(to.getWorld())) {
+            UUID playerId = player.getUniqueId();
+
+            // ИСПРАВЛЕНО: Проверяем разрешение на телепортацию
+            if (canTeleportToDuelWorld(player)) {
+                return; // Разрешаем телепортацию
+            }
+
+            // Если телепортация запрещена
+            event.setCancelled(true);
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "&cВы не можете телепортироваться в мир дуэлей!"));
+        }
+    }
+
+    /**
+     * ДОБАВЛЕНО: Проверяет, может ли игрок телепортироваться в мир дуэлей
+     * @param player Игрок для проверки
+     * @return true, если игрок может телепортироваться
+     */
+    private boolean canTeleportToDuelWorld(Player player) {
         UUID playerId = player.getUniqueId();
 
-        // Если игрок телепортируется в мир дуэлей
-        if (isInDuelWorld(event.getTo().getWorld())) {
-            // Проверяем, умер ли игрок недавно (в течение 5 секунд)
-            boolean isRecentDeath = recentDeaths.containsKey(playerId) &&
-                    System.currentTimeMillis() - recentDeaths.get(playerId) < 5000;
-
-            // Если игрок умер недавно или помечен для телепортации
-            if (isRecentDeath || plugin.getDuelManager().isMarkedForTeleport(playerId)) {
-                // Это респавн, разрешаем телепортацию
-                if (plugin.getConfig().getBoolean("debug", false)) {
-                    plugin.getLogger().info("Разрешена телепортация в мир дуэлей для игрока " +
-                            player.getName() + " (после смерти)");
-                }
-                return;
-            }
-
-            // Проверяем, участвует ли игрок в дуэли или в процессе начала дуэли
-            if (!plugin.getDuelManager().isPlayerInDuel(playerId) &&
-                    !plugin.getDuelManager().isPlayerFrozen(playerId) &&
-                    !plugin.getDuelManager().isPlayerInQueue(playerId) &&
-                    !pendingTeleports.contains(playerId) &&
-                    !player.hasPermission("restduels.bypass.worldcheck")) {
-
-                // Отменяем телепортацию
-                event.setCancelled(true);
-
-                plugin.getLogger().info("Игроку " + player.getName() + " запрещена телепортация в мир дуэлей: не в дуэли и не в процессе начала");
-            } else {
-                // Разрешаем телепортацию, так как игрок в дуэли или в процессе начала
-                if (plugin.getConfig().getBoolean("debug", false)) {
-                    String reason = "";
-                    if (plugin.getDuelManager().isPlayerInDuel(playerId)) {
-                        reason = "игрок в активной дуэли";
-                    } else if (plugin.getDuelManager().isPlayerFrozen(playerId)) {
-                        reason = "игрок заморожен перед дуэлью";
-                    } else if (plugin.getDuelManager().isPlayerInQueue(playerId)) {
-                        reason = "игрок в очереди на дуэль";
-                    } else if (pendingTeleports.contains(playerId)) {
-                        reason = "в процессе телепортации";
-                    } else if (player.hasPermission("restduels.bypass.worldcheck")) {
-                        reason = "есть право bypass";
-                    }
-
-                    plugin.getLogger().info("Игроку " + player.getName() + " разрешена телепортация в мир дуэлей: " + reason);
-                }
-            }
+        // Игроки с правом bypass всегда могут телепортироваться
+        if (player.hasPermission("restduels.bypass.worldcheck")) {
+            plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
+                    " разрешена телепортация в мир дуэлей: есть право bypass");
+            return true;
         }
+
+        // Игроки в активной дуэли могут телепортироваться
+        if (plugin.getDuelManager().isPlayerInDuel(playerId)) {
+            plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
+                    " разрешена телепортация в мир дуэлей: игрок в активной дуэли");
+            return true;
+        }
+
+        // ИСПРАВЛЕНО: Игроки в процессе подготовки (отсчет) могут телепортироваться
+        if (plugin.getDuelManager().isPlayerInCountdown(playerId)) {
+            plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
+                    " разрешена телепортация в мир дуэлей: игрок в процессе подготовки");
+            return true;
+        }
+
+        // ИСПРАВЛЕНО: Игроки в очереди могут телепортироваться
+        if (plugin.getDuelManager().isPlayerInQueue(playerId)) {
+            plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
+                    " разрешена телепортация в мир дуэлей: игрок в очереди на дуэль");
+            return true;
+        }
+
+        // Проверяем, не заморожен ли игрок
+        if (plugin.getDuelManager().isPlayerFrozen(playerId)) {
+            plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
+                    " разрешена телепортация в мир дуэлей: игрок заморожен");
+            return true;
+        }
+
+        // Если ни одно из условий не выполнено, запрещаем телепортацию
+        plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
+                " запрещена телепортация в мир дуэлей: не в дуэли и не в процессе начала");
+        return false;
     }
 
     /**
@@ -191,12 +207,9 @@ public class DuelWorldGuardian implements Listener {
             return;
         }
 
-        // Проверяем, участвует ли игрок в дуэли или в процессе начала дуэли
-        if (!plugin.getDuelManager().isPlayerInDuel(playerId) &&
-                !plugin.getDuelManager().isPlayerFrozen(playerId) &&
-                !plugin.getDuelManager().isPlayerInQueue(playerId)) {
-
-            // Игрок не в дуэли, не заморожен и не в очереди, но находится в мире дуэлей
+        // ИСПРАВЛЕНО: Проверяем все возможные состояния игрока
+        if (!canTeleportToDuelWorld(player)) {
+            // Игрок не в дуэли, не в подготовке, не в очереди и не заморожен, но находится в мире дуэлей
             // Телепортируем на последнюю сохраненную локацию
             if (plugin.getDuelManager().hasSavedLocation(playerId)) {
                 Bukkit.getScheduler().runTaskLater(plugin, () -> {

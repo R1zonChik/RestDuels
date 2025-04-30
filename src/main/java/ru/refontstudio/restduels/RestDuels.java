@@ -1,7 +1,9 @@
 package ru.refontstudio.restduels;
 
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.Location;
+import org.bukkit.boss.BossBar;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.HandlerList;
@@ -181,7 +183,13 @@ public final class RestDuels extends JavaPlugin {
             arenaGuardian.stopPeriodicCheck();
         }
 
-        // Снимаем блокировку команд со всех игроков
+        // Получаем список миров дуэлей из конфига
+        List<String> duelWorlds = getConfig().getStringList("worlds.duel-worlds");
+        for (int i = 0; i < duelWorlds.size(); i++) {
+            duelWorlds.set(i, duelWorlds.get(i).toLowerCase()); // Приводим все к нижнему регистру для сравнения
+        }
+
+        // Обрабатываем всех игроков
         for (Player player : Bukkit.getOnlinePlayers()) {
             // Удаляем метаданные блокировки команд
             if (player.hasMetadata("restduels_blocked_commands")) {
@@ -196,10 +204,56 @@ public final class RestDuels extends JavaPlugin {
             } catch (Exception e) {
                 // Игнорируем ошибки
             }
+
+            // НОВОЕ: Удаляем босс-бар для игрока, если он есть
+            if (duelManager != null && duelManager.playerBossBars != null && duelManager.playerBossBars.containsKey(player.getUniqueId())) {
+                try {
+                    BossBar bossBar = duelManager.playerBossBars.get(player.getUniqueId());
+                    if (bossBar != null) {
+                        bossBar.removeAll();
+                        getLogger().info("Удален босс-бар для игрока " + player.getName());
+                    }
+                    duelManager.playerBossBars.remove(player.getUniqueId());
+                } catch (Exception e) {
+                    getLogger().warning("Ошибка при удалении босс-бара: " + e.getMessage());
+                }
+            }
+
+            // НОВОЕ: Проверяем, находится ли игрок в мире дуэлей
+            if (player.getWorld() != null && duelWorlds.contains(player.getWorld().getName().toLowerCase())) {
+                // Игрок в мире дуэлей, телепортируем его на спавн
+                getLogger().info("Телепортация игрока " + player.getName() + " из мира дуэлей на спавн");
+
+                // Используем команду spawn
+                String spawnCommand = "spawn " + player.getName();
+                try {
+                    // Выполняем команду от имени консоли
+                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), spawnCommand);
+                    player.sendMessage(ChatColor.translateAlternateColorCodes('&',
+                            getConfig().getString("messages.prefix") + "&cПлагин дуэлей перезагружается. Вы были телепортированы на спавн."));
+                } catch (Exception e) {
+                    getLogger().warning("Ошибка при телепортации игрока " + player.getName() + " на спавн: " + e.getMessage());
+                }
+            }
         }
 
         // Очищаем все задачи и данные
         if (duelManager != null) {
+            // НОВОЕ: Удаляем все босс-бары перед очисткой данных
+            try {
+                if (duelManager.playerBossBars != null) {
+                    for (BossBar bossBar : duelManager.playerBossBars.values()) {
+                        if (bossBar != null) {
+                            bossBar.removeAll();
+                        }
+                    }
+                    duelManager.playerBossBars.clear();
+                    getLogger().info("Все босс-бары успешно удалены");
+                }
+            } catch (Exception e) {
+                getLogger().warning("Ошибка при удалении всех босс-баров: " + e.getMessage());
+            }
+
             duelManager.clearAllDuelsWithoutTasks();
         }
 
@@ -235,18 +289,6 @@ public final class RestDuels extends JavaPlugin {
                 if (restoreManager.hasActiveState(areaName)) {
                     restoreManager.saveAreaState(areaName, restoreManager.getSavedStates(areaName));
                 }
-            }
-        }
-
-        // Завершаем все активные дуэли без телепортации игроков
-        // (это предотвратит попытку запланировать задачи при выключении)
-        if (duelManager != null) {
-            // Модифицируем метод stopAllDuels для безопасного отключения
-            try {
-                // Очищаем все коллекции без запуска новых задач
-                duelManager.clearAllDuelsWithoutTasks();
-            } catch (Exception e) {
-                getLogger().warning("Ошибка при остановке дуэлей: " + e.getMessage());
             }
         }
 

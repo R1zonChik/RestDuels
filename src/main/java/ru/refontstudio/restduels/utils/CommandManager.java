@@ -45,7 +45,6 @@ public class CommandManager {
     public void unblockCommands(UUID playerId) {
         blockedPlayers.remove(playerId);
         if (plugin.getConfig().getBoolean("debug", false)) {
-            plugin.getLogger().info("Команды разблокированы для игрока " + playerId);
         }
     }
 

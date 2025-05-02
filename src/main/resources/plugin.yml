@@ -3,7 +3,7 @@ version: '${project.version}'
 main: ru.refontstudio.restduels.RestDuels
 api-version: '1.16'
 depend: []
-softdepend: [ProtocolLib, PlacehodlerAPI]
+softdepend: [PlaceholderAPI, WorldEdit, WorldGuard, ProtocolLib]
 commands:
   duel:
     description: Команды для дуэлей

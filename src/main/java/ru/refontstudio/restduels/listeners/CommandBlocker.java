@@ -191,8 +191,7 @@ public class CommandBlocker implements Listener {
                                 // Блокируем команду
                                 player.sendMessage(ColorUtils.colorize(
                                         mainPlugin.getConfig().getString("messages.prefix") +
-                                                "&cКоманды заблокированы во время дуэли! " +
-                                                "Разрешена только команда /hub."));
+                                                "&cКоманды заблокированы во время дуэли!"));
                                 return true;
                             }
                         }

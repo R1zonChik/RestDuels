@@ -20,15 +20,25 @@ public class DuelBuildListener implements Listener {
 
     @EventHandler(priority = EventPriority.NORMAL)
     public void onBlockPlace(BlockPlaceEvent event) {
-        // Проверяем, включено ли строительство в конфиге
-        if (!plugin.getConfig().getBoolean("building.allow-building", true)) {
-            return;
-        }
-
         Player player = event.getPlayer();
 
         // Проверяем, участвует ли игрок в дуэли
         if (!plugin.getDuelManager().isPlayerInDuel(player.getUniqueId())) {
+            return;
+        }
+
+        // ИЗМЕНЕНО: Проверяем, разрешено ли строительство в конфиге
+        // Если строительство запрещено, отменяем событие
+        if (!plugin.getConfig().getBoolean("building.allow-building", true)) {
+            event.setCancelled(true);
+
+            // Отправляем сообщение только если включено уведомление
+            if (plugin.getConfig().getBoolean("building.notify-on-build-attempt", true)) {
+                player.sendMessage(ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") +
+                                plugin.getConfig().getString("messages.building-disabled",
+                                        "&cСтроительство запрещено во время дуэлей!")));
+            }
             return;
         }
 
@@ -75,18 +85,28 @@ public class DuelBuildListener implements Listener {
     public void onBlockBreak(BlockBreakEvent event) {
         Player player = event.getPlayer();
 
-        // Проверяем, включено ли строительство в конфиге
+        // Проверяем, участвует ли игрок в дуэли
+        if (!plugin.getDuelManager().isPlayerInDuel(player.getUniqueId())) {
+            return;
+        }
+
+        // ИЗМЕНЕНО: Проверяем, разрешено ли строительство в конфиге
+        // Если строительство запрещено, отменяем событие
         if (!plugin.getConfig().getBoolean("building.allow-building", true)) {
+            event.setCancelled(true);
+
+            // Отправляем сообщение только если включено уведомление
+            if (plugin.getConfig().getBoolean("building.notify-on-build-attempt", true)) {
+                player.sendMessage(ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") +
+                                plugin.getConfig().getString("messages.building-disabled",
+                                        "&cСтроительство запрещено во время дуэлей!")));
+            }
             return;
         }
 
         // Проверяем, включено ли ограничение на ломание только построенных блоков
         boolean onlyPlayerBlocks = plugin.getConfig().getBoolean("building.allow-breaking-only-player-blocks", true);
-
-        // Проверяем, участвует ли игрок в дуэли
-        if (!plugin.getDuelManager().isPlayerInDuel(player.getUniqueId())) {
-            return;
-        }
 
         Duel duel = plugin.getDuelManager().getPlayerDuel(player.getUniqueId());
 
@@ -109,9 +129,14 @@ public class DuelBuildListener implements Listener {
             } else {
                 // Запрещаем ломать оригинальные блоки арены
                 event.setCancelled(true);
-                player.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                "&cВы можете ломать только блоки, построенные во время дуэли!"));
+
+                // Отправляем сообщение только если включено уведомление
+                if (plugin.getConfig().getBoolean("building.notify-on-break-attempt", false)) {
+                    player.sendMessage(ColorUtils.colorize(
+                            plugin.getConfig().getString("messages.prefix") +
+                                    plugin.getConfig().getString("messages.break-original-blocks-disabled",
+                                            "&cВы можете ломать только блоки, построенные во время дуэли!")));
+                }
             }
         }
     }

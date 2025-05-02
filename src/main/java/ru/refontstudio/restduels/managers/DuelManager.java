@@ -118,11 +118,58 @@ public class DuelManager {
      * @param duelTimeSeconds Время дуэли в секундах
      */
     private void startBossBarTimer(Player player1, Player player2, Duel duel, int duelTimeSeconds) {
+        // Загружаем настройки из конфига
+        String titleTemplate = plugin.getConfig().getString("bossbar.title", "&6Осталось времени: &e%time%");
+
+        // Определяем стиль BossBar
+        String styleStr = plugin.getConfig().getString("bossbar.style", "SOLID");
+        BarStyle style;
+        try {
+            style = BarStyle.valueOf(styleStr.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            style = BarStyle.SOLID;
+            plugin.getLogger().warning("Неверный стиль BossBar в конфиге: " + styleStr + ". Используется SOLID.");
+        }
+
+        // Определяем цвета BossBar
+        String defaultColorStr = plugin.getConfig().getString("bossbar.colors.default", "GREEN");
+        String warningColorStr = plugin.getConfig().getString("bossbar.colors.warning", "YELLOW");
+        String dangerColorStr = plugin.getConfig().getString("bossbar.colors.danger", "RED");
+
+        BarColor defaultColor, warningColor, dangerColor;
+        try {
+            defaultColor = BarColor.valueOf(defaultColorStr.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            defaultColor = BarColor.GREEN;
+            plugin.getLogger().warning("Неверный цвет BossBar в конфиге: " + defaultColorStr + ". Используется GREEN.");
+        }
+
+        try {
+            warningColor = BarColor.valueOf(warningColorStr.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            warningColor = BarColor.YELLOW;
+            plugin.getLogger().warning("Неверный цвет BossBar в конфиге: " + warningColorStr + ". Используется YELLOW.");
+        }
+
+        try {
+            dangerColor = BarColor.valueOf(dangerColorStr.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            dangerColor = BarColor.RED;
+            plugin.getLogger().warning("Неверный цвет BossBar в конфиге: " + dangerColorStr + ". Используется RED.");
+        }
+
+        // Получаем пороги для смены цвета
+        int warningThreshold = plugin.getConfig().getInt("bossbar.color_change.warning", 60);
+        int dangerThreshold = plugin.getConfig().getInt("bossbar.color_change.danger", 30);
+
+        // Форматируем начальный текст
+        String initialTitle = titleTemplate.replace("%time%", formatTime(duelTimeSeconds));
+
         // Создаем BossBar с начальным текстом и цветом
         BossBar bossBar = Bukkit.createBossBar(
-                ColorUtils.colorize("&6Осталось времени: &e" + formatTime(duelTimeSeconds)),
-                BarColor.YELLOW,
-                BarStyle.SOLID);
+                ColorUtils.colorize(initialTitle),
+                defaultColor,
+                style);
 
         // Добавляем игроков к BossBar
         bossBar.addPlayer(player1);
@@ -136,15 +183,23 @@ public class DuelManager {
         final int startTime = duelTimeSeconds;
         final int[] timeLeft = {duelTimeSeconds};
 
+        // Сохраняем необходимые переменные как final для использования в лямбде
+        final UUID player1Id = player1.getUniqueId();
+        final UUID player2Id = player2.getUniqueId();
+        final String titleTemplateFinal = titleTemplate;
+        final BarColor warningColorFinal = warningColor;
+        final BarColor dangerColorFinal = dangerColor;
+        final BarColor defaultColorFinal = defaultColor;
+
         // Запускаем таймер
         BukkitTask task = Bukkit.getScheduler().runTaskTimer(plugin, new Runnable() {
             @Override
             public void run() {
                 // Проверяем, активна ли еще дуэль
-                if (!isPlayerInDuel(player1.getUniqueId()) || !isPlayerInDuel(player2.getUniqueId())) {
+                if (!isPlayerInDuel(player1Id) || !isPlayerInDuel(player2Id)) {
                     bossBar.removeAll();
-                    playerBossBars.remove(player1.getUniqueId());
-                    playerBossBars.remove(player2.getUniqueId());
+                    playerBossBars.remove(player1Id);
+                    playerBossBars.remove(player2Id);
                     if (duel.getTimerTask() != null) {
                         duel.getTimerTask().cancel();
                     }
@@ -157,8 +212,8 @@ public class DuelManager {
                 if (timeLeft[0] <= 0) {
                     // Время вышло, завершаем дуэль
                     bossBar.removeAll();
-                    playerBossBars.remove(player1.getUniqueId());
-                    playerBossBars.remove(player2.getUniqueId());
+                    playerBossBars.remove(player1Id);
+                    playerBossBars.remove(player2Id);
 
                     if (duel.getTimerTask() != null) {
                         duel.getTimerTask().cancel();
@@ -170,17 +225,20 @@ public class DuelManager {
                 }
 
                 // Обновляем заголовок BossBar
-                bossBar.setTitle(ColorUtils.colorize("&6Осталось времени: &e" + formatTime(timeLeft[0])));
+                String updatedTitle = titleTemplateFinal.replace("%time%", formatTime(timeLeft[0]));
+                bossBar.setTitle(ColorUtils.colorize(updatedTitle));
 
                 // Обновляем прогресс BossBar
                 double progress = (double) timeLeft[0] / startTime;
                 bossBar.setProgress(Math.max(0.0, Math.min(1.0, progress)));
 
                 // Меняем цвет в зависимости от оставшегося времени
-                if (timeLeft[0] <= 30) {
-                    bossBar.setColor(BarColor.RED);
-                } else if (timeLeft[0] <= 60) {
-                    bossBar.setColor(BarColor.YELLOW);
+                if (timeLeft[0] <= dangerThreshold) {
+                    bossBar.setColor(dangerColorFinal);
+                } else if (timeLeft[0] <= warningThreshold) {
+                    bossBar.setColor(warningColorFinal);
+                } else {
+                    bossBar.setColor(defaultColorFinal);
                 }
             }
         }, 0L, 20L); // Обновление каждую секунду
@@ -189,15 +247,17 @@ public class DuelManager {
         duel.setTimerTask(task);
     }
 
+
+
     /**
-     * Форматирует время в формате MM:SS
+     * Форматирует время в формате минуты:секунды
      * @param seconds Время в секундах
      * @return Отформатированное время
      */
     private String formatTime(int seconds) {
         int minutes = seconds / 60;
-        int secs = seconds % 60;
-        return String.format("%02d:%02d", minutes, secs);
+        int remainingSeconds = seconds % 60;
+        return String.format("%d:%02d", minutes, remainingSeconds);
     }
 
     /**
@@ -790,49 +850,56 @@ public class DuelManager {
         }
     }
 
-    // Метод для безопасной телепортации с оптимизациями
+    /**
+     * Безопасно телепортирует игрока с проверками
+     * @param player Игрок
+     * @param location Локация
+     */
     private void safeTeleport(Player player, Location location) {
-        // Проверяем, что игрок и локация существуют
-        if (player == null || location == null || location.getWorld() == null) {
-            return;
-        }
-
-        // Проверяем, не телепортировали ли мы игрока недавно
-        long now = System.currentTimeMillis();
-        if (lastTeleportTime.containsKey(player.getUniqueId()) &&
-                now - lastTeleportTime.get(player.getUniqueId()) < 500) { // 500 мс защита от спама
-            return;
-        }
-
-        // Проверяем, не выключается ли плагин
-        if (!plugin.isEnabled()) {
-            // Если плагин выключается, используем прямую телепортацию без задач
-            player.teleport(location);
-            return;
-        }
-
-        // Запоминаем время телепортации
-        lastTeleportTime.put(player.getUniqueId(), now);
-
-        // Загружаем чанк перед телепортацией
-        World world = location.getWorld();
-        Chunk chunk = world.getChunkAt(location);
-
-        // Проверяем, загружен ли чанк
-        if (!chunk.isLoaded()) {
-            // Загружаем только необходимый чанк для уменьшения нагрузки
-            try {
-                world.loadChunk(chunk);
-                // Телепортируем игрока после загрузки чанка
-                player.teleport(location);
-            } catch (Exception e) {
-                plugin.getLogger().warning("Ошибка при загрузке чанка для телепортации: " + e.getMessage());
-                // В случае ошибки все равно пытаемся телепортировать
-                player.teleport(location);
+        if (location == null || location.getWorld() == null) {
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().warning("Попытка телепортации игрока " + player.getName() + " в null локацию или мир");
             }
-        } else {
-            // Чанк уже загружен, просто телепортируем
-            player.teleport(location);
+            return;
+        }
+
+        // Проверяем, загружен ли мир
+        String worldName = location.getWorld().getName();
+        World world = Bukkit.getWorld(worldName);
+
+        if (world == null) {
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().warning("Мир " + worldName + " не загружен! Отмена телепортации для " + player.getName());
+            }
+            return;
+        }
+
+        // Проверяем, не находится ли игрок уже в этом месте
+        Location playerLoc = player.getLocation();
+        if (playerLoc.getWorld().getName().equals(worldName) &&
+                playerLoc.distanceSquared(location) < 1.0) {
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().info("Игрок " + player.getName() + " уже находится в этой локации. Пропускаем телепортацию.");
+            }
+            return;
+        }
+
+        // Запоминаем время телепортации для предотвращения двойной телепортации
+        UUID playerId = player.getUniqueId();
+        lastTeleportTime.put(playerId, System.currentTimeMillis());
+
+        // Телепортируем игрока
+        try {
+            boolean success = player.teleport(location);
+
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().info("Телепортация игрока " + player.getName() + " в " +
+                        formatLocation(location) + ": " + (success ? "успешно" : "неудачно"));
+            }
+        } catch (Exception e) {
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().severe("Ошибка при телепортации игрока " + player.getName() + ": " + e.getMessage());
+            }
         }
     }
 
@@ -899,31 +966,61 @@ public class DuelManager {
         return queuedPlayers.get(type).contains(playerId);
     }
 
+    /**
+     * Добавляет игрока в очередь на дуэль
+     * @param player Игрок
+     * @param type Тип дуэли
+     */
     public void queuePlayer(Player player, DuelType type) {
         UUID playerId = player.getUniqueId();
 
-        if (plugin.getConfig().getBoolean("debug", false)) {
-            plugin.getLogger().info("[DEBUG] Добавление игрока " + player.getName() + " в очередь типа " + type);
-        }
-
-        // Проверка на активную дуэль
-        if (isPlayerInDuel(playerId)) {
+        // ДОБАВЛЕНО: Проверяем, находится ли игрок в отсчете перед дуэлью
+        if (isPlayerInCountdown(playerId)) {
             player.sendMessage(ColorUtils.colorize(
                     plugin.getConfig().getString("messages.prefix") +
-                            plugin.getConfig().getString("messages.player-in-duel")));
+                            plugin.getConfig().getString("messages.already-in-countdown",
+                                    "&cВы не можете начать новый поиск дуэли, так как уже находитесь в подготовке к дуэли!")));
             return;
         }
 
-        // Сохраняем локацию и инвентарь
-        saveOriginalLocation(player);
-        saveOriginalInventory(player);
+        // ДОБАВЛЕНО: Проверяем, находится ли игрок уже в поиске дуэли
+        if (isPlayerInQueue(playerId)) {
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            plugin.getConfig().getString("messages.already-in-search",
+                                    "&cВы уже находитесь в поиске дуэли! Отмените текущий поиск с помощью /duel cancel.")));
+            return;
+        }
 
-        // Добавляем в очередь
+        // ДОБАВЛЕНО: Проверяем, находится ли игрок в активной дуэли
+        if (isPlayerInDuel(playerId)) {
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            plugin.getConfig().getString("messages.already-in-duel",
+                                    "&cВы не можете начать поиск дуэли, так как уже участвуете в дуэли!")));
+            return;
+        }
+
+        // Сохраняем текущий инвентарь и локацию
+        savePlayerInventory(player);
+        saveOriginalLocation(player);
+
+        // Инициализируем список, если его еще нет
+        if (!queuedPlayers.containsKey(type)) {
+            queuedPlayers.put(type, new ArrayList<>());
+        }
+
+        // Добавляем игрока в очередь
         queuedPlayers.get(type).add(playerId);
 
-        if (plugin.getConfig().getBoolean("debug", false)) {
-            plugin.getLogger().info("[DEBUG] Игрок " + player.getName() + " добавлен в очередь типа " + type);
-        }
+// Отображаем сообщение о начале поиска
+        String typeName = type.getConfigName(plugin);
+        player.sendMessage(ColorUtils.colorize(
+                plugin.getConfig().getString("messages.prefix") +
+                        plugin.getConfig().getString("messages.search-started",
+                                        "&aНачат поиск {type}! &7({time} сек)")
+                                .replace("{type}", typeName)
+                                .replace("{time}", String.valueOf(plugin.getConfig().getInt("timers.search-time", 30)))));
 
         // Отправляем кнопку отмены
         sendCancelButton(player);
@@ -1434,6 +1531,12 @@ public class DuelManager {
     public void returnPlayer(Player player, boolean restoreInventory) {
         UUID playerId = player.getUniqueId();
 
+        // Логируем действие, если включен режим отладки
+        if (plugin.getConfig().getBoolean("debug", false)) {
+            plugin.getLogger().info("Начинаем возврат игрока " + player.getName() +
+                    " (UUID: " + playerId + "), restoreInventory=" + restoreInventory);
+        }
+
         // Удаляем из списков
         frozenPlayers.remove(playerId);
         playerArenas.remove(playerId);
@@ -1447,54 +1550,111 @@ public class DuelManager {
             player.setAllowFlight(allowFlight);
             if (allowFlight) player.setFlying(allowFlight);
             playerFlightStatus.remove(playerId);
+
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().info("Восстановлен статус полета для " + player.getName() + ": " + allowFlight);
+            }
         }
 
-        // ДОБАВЛЕНО: Проверяем, находится ли игрок в мире дуэлей
-        // Если игрок НЕ в мире дуэлей, не телепортируем его
-        boolean isInDuelWorld = isInDuelWorld(player.getWorld().getName());
+        // Телепортируем на исходную позицию
+        Location teleportLocation = null;
+        boolean locationFound = false;
 
-        // Телепортируем только если игрок в мире дуэлей
-        if (isInDuelWorld) {
-            // Телепортируем на исходную позицию
-            Location teleportLocation = null;
-            if (originalWorldLocations.containsKey(playerId)) {
-                teleportLocation = originalWorldLocations.get(playerId);
-                if (teleportLocation != null && teleportLocation.getWorld() != null &&
-                        !isInDuelWorld(teleportLocation.getWorld().getName())) {
-                    safeTeleport(player, teleportLocation);
-                }
-                originalWorldLocations.remove(playerId);
-            } else if (playerLocations.containsKey(playerId)) {
-                teleportLocation = playerLocations.get(playerId);
-                if (teleportLocation != null && teleportLocation.getWorld() != null &&
-                        !isInDuelWorld(teleportLocation.getWorld().getName())) {
-                    safeTeleport(player, teleportLocation);
-                    playerLocations.remove(playerId);
+        // ИЗМЕНЕНО: Сначала проверяем originalWorldLocations (сохраненная локация ДО входа в мир дуэли)
+        if (originalWorldLocations.containsKey(playerId)) {
+            teleportLocation = originalWorldLocations.get(playerId);
+            if (teleportLocation != null && teleportLocation.getWorld() != null) {
+                locationFound = true;
+
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().info("Найдена оригинальная локация для " + player.getName() + ": " +
+                            formatLocation(teleportLocation));
                 }
             }
         }
 
+        // Если не нашли в originalWorldLocations, проверяем playerLocations
+        if (!locationFound && playerLocations.containsKey(playerId)) {
+            teleportLocation = playerLocations.get(playerId);
+            if (teleportLocation != null && teleportLocation.getWorld() != null) {
+                locationFound = true;
+
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().info("Найдена локация в playerLocations для " + player.getName() + ": " +
+                            formatLocation(teleportLocation));
+                }
+            }
+        }
+
+        // ДОБАВЛЕНО: Если не нашли локацию или мир null, используем спавн основного мира
+        if (!locationFound || teleportLocation == null || teleportLocation.getWorld() == null) {
+            World defaultWorld = Bukkit.getWorlds().get(0); // Получаем первый (обычно основной) мир
+            teleportLocation = defaultWorld.getSpawnLocation();
+
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().warning("Не удалось найти сохраненную локацию для " + player.getName() +
+                        ", используем спавн мира: " + formatLocation(teleportLocation));
+            }
+        }
+
+        // ИЗМЕНЕНО: Безопасно телепортируем игрока с проверками
+        if (teleportLocation != null && teleportLocation.getWorld() != null) {
+            // Проверяем, загружен ли мир
+            String worldName = teleportLocation.getWorld().getName();
+            World world = Bukkit.getWorld(worldName);
+
+            if (world == null) {
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().warning("Мир " + worldName + " не загружен! Используем спавн основного мира.");
+                }
+                world = Bukkit.getWorlds().get(0);
+                teleportLocation = world.getSpawnLocation();
+            }
+
+            // Проверяем, находится ли игрок в мире дуэли
+            if (isInDuelWorld(player.getWorld().getName())) {
+                // Если игрок в мире дуэли, телепортируем его обратно
+                safeTeleport(player, teleportLocation);
+                player.sendMessage(ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") +
+                                "&aВы были телепортированы на исходную позицию."));
+
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().info("Игрок " + player.getName() + " телепортирован из мира дуэли на: " +
+                            formatLocation(teleportLocation));
+                }
+            }
+        } else {
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().severe("Критическая ошибка: teleportLocation == null или мир == null для " + player.getName());
+            }
+
+            // В случае ошибки, телепортируем на спавн основного мира
+            player.teleport(Bukkit.getWorlds().get(0).getSpawnLocation());
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "&cПроизошла ошибка при телепортации. Вы были телепортированы на спавн."));
+        }
+
         // Восстанавливаем инвентарь только если это требуется
         if (restoreInventory) {
-            // Проверяем, был ли игрок в активной дуэли
-            boolean wasInDuel = duelCountdownPlayers.contains(playerId);
-
-            // Восстанавливаем инвентарь только если игрок был в дуэли
-            if (wasInDuel) {
-                // Восстанавливаем инвентарь
-                if (originalInventories.containsKey(playerId)) {
-                    player.getInventory().setContents(originalInventories.get(playerId));
-                    originalInventories.remove(playerId);
-                }
-
-                if (originalArmor.containsKey(playerId)) {
-                    player.getInventory().setArmorContents(originalArmor.get(playerId));
-                    originalArmor.remove(playerId);
-                }
-            } else {
-                // При отмене поиска просто удаляем сохраненный инвентарь без восстановления
+            // Восстанавливаем инвентарь
+            if (originalInventories.containsKey(playerId)) {
+                player.getInventory().setContents(originalInventories.get(playerId));
                 originalInventories.remove(playerId);
+
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().info("Восстановлен инвентарь для " + player.getName());
+                }
+            }
+
+            if (originalArmor.containsKey(playerId)) {
+                player.getInventory().setArmorContents(originalArmor.get(playerId));
                 originalArmor.remove(playerId);
+
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().info("Восстановлена броня для " + player.getName());
+                }
             }
         } else {
             // Если не нужно восстанавливать инвентарь, просто очищаем сохраненные данные
@@ -1502,7 +1662,38 @@ public class DuelManager {
             originalArmor.remove(playerId);
         }
 
+        // Очищаем сохраненные локации
+        originalWorldLocations.remove(playerId);
+        playerLocations.remove(playerId);
+
+        // Обновляем инвентарь
         player.updateInventory();
+
+        // Разблокируем команды
+        if (player.hasMetadata("restduels_blocked_commands")) {
+            player.removeMetadata("restduels_blocked_commands", plugin);
+        }
+
+        // Если есть CommandBlocker, разблокируем команды
+        try {
+            CommandBlocker commandBlocker = plugin.getCommandBlocker();
+            if (commandBlocker != null) {
+                commandBlocker.removePlayer(playerId);
+            }
+        } catch (Exception e) {
+            // Игнорируем ошибки, если класс или методы не найдены
+        }
+    }
+
+    /**
+     * Форматирует локацию для вывода в лог
+     * @param location Локация
+     * @return Отформатированная строка
+     */
+    private String formatLocation(Location location) {
+        if (location == null) return "null";
+        if (location.getWorld() == null) return "world=null, x=" + location.getX() + ", y=" + location.getY() + ", z=" + location.getZ();
+        return "world=" + location.getWorld().getName() + ", x=" + location.getX() + ", y=" + location.getY() + ", z=" + location.getZ();
     }
 
     /**
@@ -1876,7 +2067,7 @@ public class DuelManager {
             return;
         }
 
-        // Убедимся, что оригинальные локации сохранены для обоих игроков
+        // Сохраняем исходные локации ОБОИХ игроков
         saveOriginalLocation(player1);
         saveOriginalLocation(player2);
 
@@ -2118,17 +2309,17 @@ public class DuelManager {
      */
     private void endDuelAsDraw(Duel duel) {
         // Получаем ID игроков
-        UUID player1Id = duel.getPlayer1Id();
-        UUID player2Id = duel.getPlayer2Id();
+        final UUID player1Id = duel.getPlayer1Id();
+        final UUID player2Id = duel.getPlayer2Id();
 
         // Получаем игроков (если они онлайн)
-        Player player1 = Bukkit.getPlayer(player1Id);
-        Player player2 = Bukkit.getPlayer(player2Id);
+        final Player player1 = Bukkit.getPlayer(player1Id);
+        final Player player2 = Bukkit.getPlayer(player2Id);
 
         // Отправляем сообщение о ничьей
         String drawMessage = ColorUtils.colorize(
                 plugin.getConfig().getString("messages.prefix") +
-                        "&eВремя вышло! Дуэль завершилась ничьей.");
+                        plugin.getConfig().getString("messages.duel-draw", "&eВремя вышло! Дуэль завершилась ничьей."));
 
         if (player1 != null && player1.isOnline()) {
             player1.sendMessage(drawMessage);
@@ -2159,54 +2350,148 @@ public class DuelManager {
         playerDuels.remove(player1Id);
         playerDuels.remove(player2Id);
 
+        // Получаем арену (сохраняем как final)
+        final Arena arena = duel.getArena();
+
         // Освобождаем арену
-        occupiedArenas.remove(duel.getArena().getId());
+        if (arena != null) {
+            occupiedArenas.remove(arena.getId());
+        }
 
         // Проверяем очередь на арену
         checkArenaQueue();
 
-        // Телепортируем игроков обратно с задержкой
-        scheduleDelayedReturn(player1, 5);
-        scheduleDelayedReturn(player2, 5);
+        // Разное поведение в зависимости от типа дуэли
+        if (duel.getType() == DuelType.RANKED) {
+            // В режиме RANKED (без потерь) сразу возвращаем обоих игроков
+            if (player1 != null && player1.isOnline()) {
+                returnPlayer(player1, true);
+            }
+
+            if (player2 != null && player2.isOnline()) {
+                returnPlayer(player2, true);
+            }
+
+            // Восстанавливаем арену
+            restoreArenaAfterDuel(duel);
+        } else {
+            // Для CLASSIC и NORMAL даем время на сбор предметов
+            // При ничьей даем время собрать вещи обоим
+            String delayMessage = ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            plugin.getConfig().getString("messages.delay-collect"));
+
+            // Получаем время сбора ресурсов из конфига
+            int collectTime = plugin.getConfig().getInt("duel.resource-collection-time", 60);
+
+            // Создаем задачу для отложенного возврата игроков
+            createDelayedReturnTask(duel, player1Id, player2Id, collectTime);
+
+            // Отправляем сообщения и кнопки
+            if (player1 != null && player1.isOnline()) {
+                player1.sendMessage(delayMessage);
+                sendEarlyReturnButton(player1);
+            }
+
+            if (player2 != null && player2.isOnline()) {
+                player2.sendMessage(delayMessage);
+                sendEarlyReturnButton(player2);
+            }
+        }
     }
 
     /**
-     * Сохраняет оригинальную локацию игрока перед дуэлью (только если он не в мире дуэлей)
+     * Создает задачу для отложенного возврата игроков
+     * @param duel Дуэль
+     * @param player1Id UUID первого игрока
+     * @param player2Id UUID второго игрока
+     * @param delaySeconds Задержка в секундах
+     */
+    private void createDelayedReturnTask(Duel duel, UUID player1Id, UUID player2Id, int delaySeconds) {
+        // Создаем новую задачу
+        BukkitTask task = Bukkit.getScheduler().runTaskLater(plugin, new Runnable() {
+            @Override
+            public void run() {
+                // Получаем игроков (они могут быть оффлайн)
+                Player player1 = Bukkit.getPlayer(player1Id);
+                Player player2 = Bukkit.getPlayer(player2Id);
+
+                // Возвращаем первого игрока, если он не в новой дуэли
+                if (player1 != null && player1.isOnline()) {
+                    // ДОБАВЛЕНО: Проверяем, не находится ли игрок в новой дуэли
+                    if (!isPlayerInDuel(player1Id) && isInDuelWorld(player1)) {
+                        returnPlayer(player1, false);
+                        player1.sendMessage(ColorUtils.colorize(
+                                plugin.getConfig().getString("messages.prefix") +
+                                        "&aВремя сбора ресурсов истекло. Вы были телепортированы на исходную позицию."));
+                    }
+                }
+
+                // Возвращаем второго игрока, если он не в новой дуэли
+                if (player2 != null && player2.isOnline()) {
+                    // ДОБАВЛЕНО: Проверяем, не находится ли игрок в новой дуэли
+                    if (!isPlayerInDuel(player2Id) && isInDuelWorld(player2)) {
+                        returnPlayer(player2, false);
+                        player2.sendMessage(ColorUtils.colorize(
+                                plugin.getConfig().getString("messages.prefix") +
+                                        "&aВремя сбора ресурсов истекло. Вы были телепортированы на исходную позицию."));
+                    }
+                }
+
+                // Восстанавливаем арену
+                restoreArenaAfterDuel(duel);
+
+                // Удаляем задачи из списка
+                delayedReturnTasks.remove(player1Id);
+                delayedReturnTasks.remove(player2Id);
+            }
+        }, delaySeconds * 20L);
+
+        // Сохраняем задачу для обоих игроков
+        delayedReturnTasks.put(player1Id, task);
+        delayedReturnTasks.put(player2Id, task);
+    }
+
+    /**
+     * Восстанавливает арену после дуэли
+     * @param duel Дуэль
+     */
+    private void restoreArenaAfterDuel(Duel duel) {
+        // Логируем количество построенных блоков для статистики
+        int placedBlocksCount = duel.getPlayerPlacedBlocks().size();
+        if (placedBlocksCount > 0) {
+            plugin.getLogger().info("Дуэль завершена с " + placedBlocksCount + " построенными блоками. Восстанавливаем арену...");
+        }
+
+        // Очищаем арену от стрел и других ресурсов
+        if (duel.getArena() != null) {
+            // Автоматическое восстановление арены
+            plugin.getRestoreManager().restoreArenaAreas(duel.getArena().getId());
+
+            // Принудительное восстановление через команду
+            forceRestoreArena(duel.getArena().getId());
+        }
+    }
+
+    /**
+     * Сохраняет исходную локацию игрока перед дуэлью
      * @param player Игрок
      */
     public void saveOriginalLocation(Player player) {
         UUID playerId = player.getUniqueId();
+        Location location = player.getLocation().clone();
 
-        // ИЗМЕНЕНО: Если локация уже сохранена, не перезаписываем её
-        if (originalWorldLocations.containsKey(playerId)) {
-            if (plugin.getConfig().getBoolean("debug", false)) {
-                plugin.getLogger().info("Исходная локация для игрока " + player.getName() +
-                        " уже сохранена, не перезаписываем.");
-            }
-            return;
-        }
-
-        // Проверяем, находится ли игрок в мире дуэлей
-        if (!isInDuelWorld(player)) {
-            // Сохраняем локацию только если игрок НЕ в мире дуэлей
-            Location location = player.getLocation().clone();
-
-            // Сохраняем в память
+        // Сохраняем только если игрок НЕ в мире дуэли
+        if (!isInDuelWorld(player.getWorld().getName())) {
             originalWorldLocations.put(playerId, location);
 
-            // Сохраняем в файл
-            if (plugin.getConfig().getBoolean("location_saving.save_to_file", true)) {
-                savePlayerLocationToFile(playerId, location);
-            }
-
             if (plugin.getConfig().getBoolean("debug", false)) {
-                plugin.getLogger().info("Сохранена оригинальная локация для игрока " + player.getName() +
-                        " в мире " + location.getWorld().getName());
+                plugin.getLogger().info("Сохранена исходная локация для " + player.getName() + ": " +
+                        formatLocation(location));
             }
         } else {
             if (plugin.getConfig().getBoolean("debug", false)) {
-                plugin.getLogger().info("Не сохраняем локацию для игрока " + player.getName() +
-                        ", так как он уже в мире дуэлей");
+                plugin.getLogger().info("Игрок " + player.getName() + " уже в мире дуэли, не сохраняем локацию");
             }
         }
     }
@@ -3047,39 +3332,46 @@ public class DuelManager {
             playerFlightStatus.remove(playerId);
         }
 
-        // ИЗМЕНЕНО: Используем originalWorldLocations вместо playerLocations
-        Location teleportLocation = null;
-        boolean teleportSuccessful = false;
-
-        // Сначала проверяем originalWorldLocations - там хранится локация ДО входа в мир дуэли
-        if (originalWorldLocations.containsKey(playerId)) {
-            teleportLocation = originalWorldLocations.get(playerId);
-            if (teleportLocation != null && teleportLocation.getWorld() != null &&
-                    !isInDuelWorld(teleportLocation.getWorld().getName())) {
-                safeTeleport(player, teleportLocation);
-                teleportSuccessful = true;
+        // ИЗМЕНЕНО: Не выполняем телепортацию, если игрок находится в дуэли
+        if (isPlayerInDuel(playerId)) {
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().info("Игрок " + player.getName() + " уже в дуэли, телепортация отменена.");
             }
-        }
-        // Если originalWorldLocations не содержит подходящей локации, пробуем playerLocations
-        else if (playerLocations.containsKey(playerId)) {
-            teleportLocation = playerLocations.get(playerId);
-            if (teleportLocation != null && teleportLocation.getWorld() != null &&
-                    !isInDuelWorld(teleportLocation.getWorld().getName())) {
-                safeTeleport(player, teleportLocation);
-                playerLocations.remove(playerId);
-                teleportSuccessful = true;
-            }
-        }
-
-        // Отправляем сообщение только один раз, после проверки всех вариантов телепортации
-        if (teleportSuccessful) {
-            player.sendMessage(ColorUtils.colorize(
-                    plugin.getConfig().getString("messages.prefix") +
-                            "&aВы были досрочно телепортированы на исходную позицию."));
         } else {
-            player.sendMessage(ColorUtils.colorize(
-                    plugin.getConfig().getString("messages.prefix") +
-                            "&cНе удалось найти безопасную локацию для телепортации. Пожалуйста, используйте /spawn."));
+            // ИЗМЕНЕНО: Используем originalWorldLocations вместо playerLocations
+            Location teleportLocation = null;
+            boolean teleportSuccessful = false;
+
+            // Сначала проверяем originalWorldLocations - там хранится локация ДО входа в мир дуэли
+            if (originalWorldLocations.containsKey(playerId)) {
+                teleportLocation = originalWorldLocations.get(playerId);
+                if (teleportLocation != null && teleportLocation.getWorld() != null &&
+                        !isInDuelWorld(teleportLocation.getWorld().getName())) {
+                    safeTeleport(player, teleportLocation);
+                    teleportSuccessful = true;
+                }
+            }
+            // Если originalWorldLocations не содержит подходящей локации, пробуем playerLocations
+            else if (playerLocations.containsKey(playerId)) {
+                teleportLocation = playerLocations.get(playerId);
+                if (teleportLocation != null && teleportLocation.getWorld() != null &&
+                        !isInDuelWorld(teleportLocation.getWorld().getName())) {
+                    safeTeleport(player, teleportLocation);
+                    playerLocations.remove(playerId);
+                    teleportSuccessful = true;
+                }
+            }
+
+            // Отправляем сообщение только один раз, после проверки всех вариантов телепортации
+            if (teleportSuccessful) {
+                player.sendMessage(ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") +
+                                "&aВы были досрочно телепортированы на исходную позицию."));
+            } else {
+                player.sendMessage(ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") +
+                                "&cНе удалось найти безопасную локацию для телепортации. Пожалуйста, используйте /spawn."));
+            }
         }
 
         // ДОБАВЛЯЕМ: Разрешаем использование команд
@@ -4166,16 +4458,30 @@ public class DuelManager {
         return playerDuels.get(playerId);
     }
 
+    /**
+     * Получает количество игроков в очереди на дуэль указанного типа
+     * @param type Тип дуэли
+     * @return Количество игроков в очереди
+     */
     public int getQueueSize(DuelType type) {
+        if (!queuedPlayers.containsKey(type)) {
+            return 0;
+        }
         return queuedPlayers.get(type).size();
     }
 
-    // Получить количество игроков в очереди на арену
+    /**
+     * Получает количество игроков в очереди на арену
+     * @return Количество игроков в очереди
+     */
     public int getArenaQueueSize() {
-        return arenaQueue.size() * 2; // Каждая запись содержит 2 игроков
+        return arenaQueue.size() * 2; // Каждая запись в очереди содержит пару игроков
     }
 
-    // Получить количество занятых арен
+    /**
+     * Получает количество занятых арен
+     * @return Количество занятых арен
+     */
     public int getOccupiedArenasCount() {
         return occupiedArenas.size();
     }

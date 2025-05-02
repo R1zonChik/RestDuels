@@ -15,6 +15,7 @@ import ru.refontstudio.restduels.config.ConfigManager;
 import ru.refontstudio.restduels.integrations.ProtocolLibIntegration;
 import ru.refontstudio.restduels.listeners.*;
 import ru.refontstudio.restduels.managers.*;
+import ru.refontstudio.restduels.placeholders.RestDuelsPlaceholder;
 import ru.refontstudio.restduels.utils.ColorUtils;
 import ru.refontstudio.restduels.utils.TitleManager;
 
@@ -108,6 +109,14 @@ public final class RestDuels extends JavaPlugin {
                     }
                 }
             });
+        }
+
+        // Регистрация PlaceholderAPI расширения, если PlaceholderAPI установлен
+        if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
+            new RestDuelsPlaceholder(this).register();
+            getLogger().info("PlaceholderAPI найден! Плейсхолдеры зарегистрированы.");
+        } else {
+            getLogger().info("PlaceholderAPI не найден! Плейсхолдеры недоступны.");
         }
 
         // Инициализация интеграций

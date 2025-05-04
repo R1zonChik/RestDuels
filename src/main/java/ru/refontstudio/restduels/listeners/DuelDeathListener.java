@@ -28,11 +28,21 @@ public class DuelDeathListener implements Listener {
         Player player = event.getEntity();
         UUID playerId = player.getUniqueId();
 
-        // Проверяем, есть ли у игрока оригинальная локация
-        Location originalLocation = plugin.getDuelManager().getOriginalLocation(playerId);
+        // Проверяем, находится ли игрок в состоянии дуэли
+        if (!plugin.getDuelManager().isPlayerInDuel(playerId)) {
+            // Не в дуэли? Тогда игнорируем — пусть работают другие плагины (например, спавн)
+            return;
+        }
 
+        // Или проверить, что умер именно в дуэльном мире
+        if (!plugin.getConfig().getStringList("worlds.duel-worlds").contains(
+                player.getWorld().getName().toLowerCase())) {
+            return;
+        }
+
+        // ОРИГИНАЛЬНЫЙ КОД:
+        Location originalLocation = plugin.getDuelManager().getOriginalLocation(playerId);
         if (originalLocation != null && originalLocation.getWorld() != null) {
-            // Запоминаем локацию для респавна
             pendingRespawns.put(playerId, originalLocation);
 
             if (plugin.getConfig().getBoolean("debug", false)) {

@@ -2480,9 +2480,8 @@ public class DuelManager {
     public void saveOriginalLocation(Player player) {
         UUID playerId = player.getUniqueId();
         Location location = player.getLocation().clone();
-
-        // Сохраняем только если игрок НЕ в мире дуэли
         if (!isInDuelWorld(player.getWorld().getName())) {
+            // СЕЙЧАС: Записывает только если НЕ в мире дуэлей
             originalWorldLocations.put(playerId, location);
 
             if (plugin.getConfig().getBoolean("debug", false)) {

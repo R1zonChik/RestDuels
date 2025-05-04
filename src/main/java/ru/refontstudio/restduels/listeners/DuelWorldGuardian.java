@@ -127,50 +127,34 @@ public class DuelWorldGuardian implements Listener {
 
         // Игроки с правом bypass всегда могут телепортироваться
         if (player.hasPermission("restduels.bypass.worldcheck")) {
-            plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
-                    " разрешена телепортация в мир дуэлей: есть право bypass");
             return true;
         }
 
         // Игроки в активной дуэли могут телепортироваться
         if (plugin.getDuelManager().isPlayerInDuel(playerId)) {
-            plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
-                    " разрешена телепортация в мир дуэлей: игрок в активной дуэли");
             return true;
         }
 
         // Игроки в процессе подготовки (отсчет) могут телепортироваться
         if (plugin.getDuelManager().isPlayerInCountdown(playerId)) {
-            plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
-                    " разрешена телепортация в мир дуэлей: игрок в процессе подготовки");
             return true;
         }
 
         // Игроки в очереди могут телепортироваться
         if (plugin.getDuelManager().isPlayerInQueue(playerId)) {
-            plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
-                    " разрешена телепортация в мир дуэлей: игрок в очереди на дуэль");
             return true;
         }
 
         // Проверяем, не заморожен ли игрок
         if (plugin.getDuelManager().isPlayerFrozen(playerId)) {
-            plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
-                    " разрешена телепортация в мир дуэлей: игрок заморожен");
             return true;
         }
 
         // ДОБАВЛЕНО: Проверяем, есть ли у игрока отложенная задача возврата
         // Это означает, что дуэль закончилась, но у игрока есть время на сбор предметов
         if (plugin.getDuelManager().hasDelayedReturnTask(playerId)) {
-            plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
-                    " разрешена телепортация в мир дуэлей: у игрока есть время на сбор предметов");
             return true;
         }
-
-        // Если ни одно из условий не выполнено, запрещаем телепортацию
-        plugin.getLogger().info("[RestDuels] Игроку " + player.getName() +
-                " запрещена телепортация в мир дуэлей: не в дуэли и не в процессе начала");
         return false;
     }
 

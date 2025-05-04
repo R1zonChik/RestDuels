@@ -34,13 +34,11 @@ public class DuelDeathListener implements Listener {
             return;
         }
 
-        // Или проверить, что умер именно в дуэльном мире
         if (!plugin.getConfig().getStringList("worlds.duel-worlds").contains(
                 player.getWorld().getName().toLowerCase())) {
             return;
         }
 
-        // ОРИГИНАЛЬНЫЙ КОД:
         Location originalLocation = plugin.getDuelManager().getOriginalLocation(playerId);
         if (originalLocation != null && originalLocation.getWorld() != null) {
             pendingRespawns.put(playerId, originalLocation);

@@ -101,44 +101,31 @@ public class MenuProtectionListener implements Listener {
             }
         }
     }
-
-    // Добавляем обработчик выбрасывания предметов для предотвращения подбора "фантомных" предметов
+    // Добавляем обработчик выбрасывания предметов только для предотвращения дропа из меню
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPlayerDropItem(PlayerDropItemEvent event) {
         final Player player = event.getPlayer();
 
-        // Проверяем, был ли игрок недавно в меню дуэлей
-        // Можно также добавить проверку метаданных предмета, если вы добавляете особые метаданные к предметам меню
+        // Проверяем только если у игрока открыто меню
         if (player.getOpenInventory() != null && player.getOpenInventory().getTitle() != null) {
             String title = player.getOpenInventory().getTitle();
 
+            // Блокируем выбрасывание только если открыто меню дуэлей
             if (title.contains("Дуэли") ||
                     title.contains("Выбор типа") ||
                     title.contains("Статистика") ||
                     title.contains("Информация") ||
                     title.contains("Меню") ||
+                    title.contains("Ваша статистика") ||
                     title.contains("Топ игроков")) {
 
-                // Отменяем выбрасывание предмета
+                // Отменяем выбрасывание предмета только из меню
                 event.setCancelled(true);
+                return;
             }
         }
 
-        // Проверка на "фантомные" предметы из меню
-        ItemStack item = event.getItemDrop().getItemStack();
-        if (item.hasItemMeta() && item.getItemMeta().hasDisplayName()) {
-            // Здесь можно добавить более точную проверку на предметы из меню
-            // Например, проверить особые названия или лор, характерные для предметов меню
-
-            // Для дополнительной безопасности можно удалить выброшенный предмет через тик
-            new BukkitRunnable() {
-                @Override
-                public void run() {
-                    if (!event.isCancelled() && !event.getItemDrop().isDead()) {
-                        event.getItemDrop().remove();
-                    }
-                }
-            }.runTaskLater(plugin, 1L);
-        }
+        // Во всех остальных случаях разрешаем выбрасывание предметов
+        // Удаляем проверку на "фантомные" предметы и другие ограничения
     }
 }

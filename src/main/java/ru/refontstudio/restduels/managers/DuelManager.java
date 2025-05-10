@@ -2156,8 +2156,9 @@ public class DuelManager {
      * Планирует отложенный возврат игрока
      * @param player Игрок для возврата
      * @param delaySeconds Задержка в секундах
+     * @param restoreInventory Восстанавливать ли инвентарь
      */
-    private void scheduleDelayedReturn(Player player, int delaySeconds) {
+    private void scheduleDelayedReturn(Player player, int delaySeconds, boolean restoreInventory) {
         if (player == null || !player.isOnline()) return;
 
         UUID playerId = player.getUniqueId();
@@ -2170,16 +2171,22 @@ public class DuelManager {
         // Создаем новую задачу
         BukkitTask task = Bukkit.getScheduler().runTaskLater(plugin, () -> {
             if (player.isOnline()) {
-                returnPlayer(player, true);
-//                player.sendMessage(ColorUtils.colorize(
-//                        plugin.getConfig().getString("messages.prefix") +
-//                                "&aВы были возвращены на исходную позицию."));
+                returnPlayer(player, restoreInventory);
             }
             delayedReturnTasks.remove(playerId);
-        }, delaySeconds * 2L); // Преобразуем секунды в тики (20 тиков = 1 секунда)
+        }, delaySeconds * 20L); // Преобразуем секунды в тики (20 тиков = 1 секунда)
 
         // Сохраняем задачу
         delayedReturnTasks.put(playerId, task);
+    }
+
+    /**
+     * Планирует отложенный возврат игрока с восстановлением инвентаря
+     * @param player Игрок для возврата
+     * @param delaySeconds Задержка в секундах
+     */
+    private void scheduleDelayedReturn(Player player, int delaySeconds) {
+        scheduleDelayedReturn(player, delaySeconds, true);
     }
 
     /**
@@ -2255,10 +2262,12 @@ public class DuelManager {
         if (duel.getType() == DuelType.NORMAL || duel.getType() == DuelType.CLASSIC) {
             // Проигравшего возвращаем сразу
             if (loser != null && loser.isOnline()) {
-//                loser.sendMessage(ColorUtils.colorize(
-//                        plugin.getConfig().getString("messages.prefix") +
-//                                plugin.getConfig().getString("messages.loser-returned", "&cВы проиграли и были возвращены на исходную позицию.")));
-                scheduleDelayedReturn(loser, 5);
+                // ИЗМЕНЕНО: Для CLASSIC не восстанавливаем инвентарь
+                if (duel.getType() == DuelType.CLASSIC) {
+                    scheduleDelayedReturn(loser, 5, false);
+                } else {
+                    scheduleDelayedReturn(loser, 5, true);
+                }
             }
 
             // Победителю даем время собрать вещи
@@ -2298,8 +2307,8 @@ public class DuelManager {
             }
         } else {
             // Для других типов дуэлей (RANKED) - сразу телепортируем обоих игроков
-            scheduleDelayedReturn(player1, 5);
-            scheduleDelayedReturn(player2, 5);
+            scheduleDelayedReturn(player1, 5, true);
+            scheduleDelayedReturn(player2, 5, true);
         }
     }
 

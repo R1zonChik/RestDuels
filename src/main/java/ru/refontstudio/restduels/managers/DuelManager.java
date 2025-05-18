@@ -488,47 +488,61 @@ public class DuelManager {
         }
     }
 
-    // Метод для очистки сущностей на аренах
     private void cleanupArenaEntities() {
         for (Arena arena : plugin.getArenaManager().getArenas()) {
             World world = arena.getSpawn1().getWorld();
             if (world == null) continue;
 
-            // Определяем границы арены (приблизительно)
+            // СКАНИРУЕМ только ПУСТЫЕ арены!
+            boolean arenaIsBusy = occupiedArenas.contains(arena.getId());
+
+            // ДОПОЛНИТЕЛЬНО: проверяем — нет ли на этой арене игроков, у которых еще идет таймер сбора ресурсов:
+            boolean hasDelayedPlayer = false;
+            for (UUID playerId : delayedReturnTasks.keySet()) {
+                Player p = Bukkit.getPlayer(playerId);
+                if (p != null && p.isOnline()) {
+                    Location pl = p.getLocation();
+                    // Координаты в пределах арены?
+                    double minX = Math.min(arena.getSpawn1().getX(), arena.getSpawn2().getX()) - 30;
+                    double maxX = Math.max(arena.getSpawn1().getX(), arena.getSpawn2().getX()) + 30;
+                    double minZ = Math.min(arena.getSpawn1().getZ(), arena.getSpawn2().getZ()) - 30;
+                    double maxZ = Math.max(arena.getSpawn1().getZ(), arena.getSpawn2().getZ()) + 30;
+                    if (pl.getWorld().getName().equals(world.getName()) &&
+                            pl.getX() >= minX && pl.getX() <= maxX &&
+                            pl.getZ() >= minZ && pl.getZ() <= maxZ) {
+                        hasDelayedPlayer = true;
+                        break;
+                    }
+                }
+            }
+
+            if (arenaIsBusy || hasDelayedPlayer) {
+                // На арене идет лутосбор победителем - ничего не трогаем!
+                continue;
+            }
+
+            // Теперь можно чистить только если никого не осталось на арене!
+            List<Entity> entities = world.getEntities();
+
             double minX = Math.min(arena.getSpawn1().getX(), arena.getSpawn2().getX()) - 30;
             double maxX = Math.max(arena.getSpawn1().getX(), arena.getSpawn2().getX()) + 30;
             double minZ = Math.min(arena.getSpawn1().getZ(), arena.getSpawn2().getZ()) - 30;
             double maxZ = Math.max(arena.getSpawn1().getZ(), arena.getSpawn2().getZ()) + 30;
 
-            // Проверяем, не занята ли арена
-            if (occupiedArenas.contains(arena.getId())) {
-                continue; // Пропускаем занятые арены
-            }
-
-            // Получаем все сущности в пределах арены
-            List<Entity> entities = world.getEntities();
-
             for (Entity entity : entities) {
-                // Пропускаем игроков и важные сущности
                 if (entity instanceof Player) continue;
                 if (entitiesMarkedForRemoval.contains(entity.getUniqueId())) continue;
 
                 Location loc = entity.getLocation();
 
-                // Проверяем, находится ли сущность в пределах арены
                 if (loc.getX() >= minX && loc.getX() <= maxX &&
                         loc.getZ() >= minZ && loc.getZ() <= maxZ) {
 
-                    // Отмечаем сущность для удаления
                     entitiesMarkedForRemoval.add(entity.getUniqueId());
-
-                    // Удаляем сущность в основном потоке
                     Bukkit.getScheduler().runTask(plugin, () -> entity.remove());
                 }
             }
         }
-
-        // Очищаем список сущностей, отмеченных для удаления
         entitiesMarkedForRemoval.clear();
     }
 
@@ -1638,28 +1652,20 @@ public class DuelManager {
 
         // Восстанавливаем инвентарь только если это требуется
         if (restoreInventory) {
-            // Восстанавливаем инвентарь
+            // стандартное восстановление инвентаря и брони
             if (originalInventories.containsKey(playerId)) {
                 player.getInventory().setContents(originalInventories.get(playerId));
                 originalInventories.remove(playerId);
-
-                if (plugin.getConfig().getBoolean("debug", false)) {
-                    plugin.getLogger().info("Восстановлен инвентарь для " + player.getName());
-                }
             }
-
             if (originalArmor.containsKey(playerId)) {
                 player.getInventory().setArmorContents(originalArmor.get(playerId));
                 originalArmor.remove(playerId);
-
-                if (plugin.getConfig().getBoolean("debug", false)) {
-                    plugin.getLogger().info("Восстановлена броня для " + player.getName());
-                }
             }
         } else {
-            // Если не нужно восстанавливать инвентарь, просто очищаем сохраненные данные
+            // Если не надо возвращать вещи (CLASSIC проигравший) — очистить текущий инвентарь!
             originalInventories.remove(playerId);
             originalArmor.remove(playerId);
+// НЕ ДЕЛАЙ .clear() и setArmorContents! Просто оставь инвентарь как есть!
         }
 
         // Очищаем сохраненные локации
@@ -2262,12 +2268,9 @@ public class DuelManager {
         if (duel.getType() == DuelType.NORMAL || duel.getType() == DuelType.CLASSIC) {
             // Проигравшего возвращаем сразу
             if (loser != null && loser.isOnline()) {
-                // ИЗМЕНЕНО: Для CLASSIC не восстанавливаем инвентарь
-                if (duel.getType() == DuelType.CLASSIC) {
-                    scheduleDelayedReturn(loser, 5, false);
-                } else {
-                    scheduleDelayedReturn(loser, 5, true);
-                }
+                // Для CLASSIC не используем отложенный возврат, а сразу очищаем инвентарь
+                returnPlayer(loser, false);
+                // НЕ вызываем scheduleDelayedReturn для проигравшего в CLASSIC
             }
 
             // Победителю даем время собрать вещи
@@ -3312,27 +3315,16 @@ public class DuelManager {
     public void cancelDelayedReturnAndTeleport(Player player) {
         UUID playerId = player.getUniqueId();
 
-        // Отменяем отложенную задачу, если она есть
+        // Отменяем отложенную задачу, если есть
         if (delayedReturnTasks.containsKey(playerId)) {
             delayedReturnTasks.get(playerId).cancel();
             delayedReturnTasks.remove(playerId);
-
-            if (plugin.getConfig().getBoolean("debug", false)) {
-                plugin.getLogger().info("Отменена задача отложенного возврата для игрока " + player.getName() +
-                        " при входе в новую дуэль.");
-            }
         }
 
-        // Удаляем игрока из списка замороженных
         frozenPlayers.remove(playerId);
-
-        // Удаляем арену игрока
         playerArenas.remove(playerId);
-
-        // Останавливаем проверку полета
         stopFlightCheck(playerId);
 
-        // Восстанавливаем статус полета
         if (playerFlightStatus.containsKey(playerId)) {
             boolean allowFlight = playerFlightStatus.get(playerId);
             player.setAllowFlight(allowFlight);
@@ -3340,75 +3332,67 @@ public class DuelManager {
             playerFlightStatus.remove(playerId);
         }
 
-        // ИЗМЕНЕНО: Не выполняем телепортацию, если игрок находится в дуэли
-        if (isPlayerInDuel(playerId)) {
-            if (plugin.getConfig().getBoolean("debug", false)) {
-                plugin.getLogger().info("Игрок " + player.getName() + " уже в дуэли, телепортация отменена.");
-            }
-        } else {
-            // ИЗМЕНЕНО: Используем originalWorldLocations вместо playerLocations
-            Location teleportLocation = null;
-            boolean teleportSuccessful = false;
+        // ПРАВИЛЬНО: если у игрока была отложенная задача сбора лута (то есть он победитель), мы НЕ восстанавливаем старый инвентарь!
+        boolean isWinner = hasDelayedReturnTask(playerId);
 
-            // Сначала проверяем originalWorldLocations - там хранится локация ДО входа в мир дуэли
-            if (originalWorldLocations.containsKey(playerId)) {
-                teleportLocation = originalWorldLocations.get(playerId);
-                if (teleportLocation != null && teleportLocation.getWorld() != null &&
-                        !isInDuelWorld(teleportLocation.getWorld().getName())) {
-                    safeTeleport(player, teleportLocation);
-                    teleportSuccessful = true;
-                }
-            }
-            // Если originalWorldLocations не содержит подходящей локации, пробуем playerLocations
-            else if (playerLocations.containsKey(playerId)) {
-                teleportLocation = playerLocations.get(playerId);
-                if (teleportLocation != null && teleportLocation.getWorld() != null &&
-                        !isInDuelWorld(teleportLocation.getWorld().getName())) {
-                    safeTeleport(player, teleportLocation);
-                    playerLocations.remove(playerId);
-                    teleportSuccessful = true;
-                }
-            }
+        // Сначала пытаемся найти оригинальную локацию
+        Location teleportLocation = null;
+        boolean teleportSuccessful = false;
 
-            // Отправляем сообщение только один раз, после проверки всех вариантов телепортации
-            if (teleportSuccessful) {
-                player.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                "&aВы были досрочно телепортированы на исходную позицию."));
-            } else {
-                player.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                "&cНе удалось найти безопасную локацию для телепортации. Пожалуйста, используйте /spawn."));
+        if (originalWorldLocations.containsKey(playerId)) {
+            teleportLocation = originalWorldLocations.get(playerId);
+            if (teleportLocation != null && teleportLocation.getWorld() != null && !isInDuelWorld(teleportLocation.getWorld().getName())) {
+                safeTeleport(player, teleportLocation);
+                teleportSuccessful = true;
+            }
+        } else if (playerLocations.containsKey(playerId)) {
+            teleportLocation = playerLocations.get(playerId);
+            if (teleportLocation != null && teleportLocation.getWorld() != null && !isInDuelWorld(teleportLocation.getWorld().getName())) {
+                safeTeleport(player, teleportLocation);
+                playerLocations.remove(playerId);
+                teleportSuccessful = true;
             }
         }
 
-        // ДОБАВЛЯЕМ: Разрешаем использование команд
+        // Сообщение о телепорте
+        if (teleportSuccessful) {
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "§aВы были досрочно телепортированы на исходную позицию."));
+        } else {
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "§cНе удалось найти безопасную локацию для телепортации. Пожалуйста, используйте /spawn."));
+        }
+
+        // --- КЛЮЧЕВОЕ: Победителю инвентарь НЕ возвращать! ---
+        if (isWinner) {
+            // НЕ ВОССТАНАВЛИВАТЬ ИНВЕНТАРЬ
+            originalInventories.remove(playerId);
+            originalArmor.remove(playerId);
+        } else {
+            // ПРОИГРАВШЕМУ вернуть все как было ДО дуэли
+            if (originalInventories.containsKey(playerId)) {
+                player.getInventory().setContents(originalInventories.get(playerId));
+                originalInventories.remove(playerId);
+            }
+            if (originalArmor.containsKey(playerId)) {
+                player.getInventory().setArmorContents(originalArmor.get(playerId));
+                originalArmor.remove(playerId);
+            }
+        }
+        player.updateInventory();
+
+        // Разрешить команды (если есть CommandBlocker)
         if (player.hasMetadata("restduels_blocked_commands")) {
             player.removeMetadata("restduels_blocked_commands", plugin);
         }
-
-        // Если у вас есть CommandBlocker, разрешаем команды
         try {
-            Class<?> commandBlockerClass = Class.forName("ru.refontstudio.restduels.utils.CommandBlocker");
-            if (commandBlockerClass != null) {
-                // Проверяем, есть ли метод getInstance
-                java.lang.reflect.Method getInstanceMethod = commandBlockerClass.getMethod("getInstance");
-                if (getInstanceMethod != null) {
-                    Object commandBlocker = getInstanceMethod.invoke(null);
-                    // Проверяем, есть ли метод removePlayer
-                    java.lang.reflect.Method removePlayerMethod = commandBlocker.getClass().getMethod("removePlayer", UUID.class);
-                    if (removePlayerMethod != null) {
-                        removePlayerMethod.invoke(commandBlocker, playerId);
-                    }
-                }
+            CommandBlocker commandBlocker = plugin.getCommandBlocker();
+            if (commandBlocker != null) {
+                commandBlocker.removePlayer(playerId);
             }
-        } catch (Exception e) {
-            // Игнорируем ошибки, если класс или методы не найдены
-        }
-
-        // Удаляем сохраненные данные инвентаря (не восстанавливаем)
-        originalInventories.remove(playerId);
-        originalArmor.remove(playerId);
+        } catch (Exception ignored) {}
 
         // Удаляем дуэль для игрока
         if (playerDuels.containsKey(playerId)) {

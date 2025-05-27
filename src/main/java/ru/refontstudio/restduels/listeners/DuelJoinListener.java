@@ -30,9 +30,25 @@ public class DuelJoinListener implements Listener {
         }
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST)
+    @EventHandler(priority = EventPriority.HIGH)
     public void onPlayerJoin(PlayerJoinEvent event) {
-        Player player = event.getPlayer();
+        final Player player = event.getPlayer();
+        UUID playerId = player.getUniqueId();
+
+        // ДОБАВЛЕНО: Проверяем, не был ли игрок в дуэли при выходе
+        String previousStatus = plugin.getDuelManager().loadPlayerDuelStatusFromFile(playerId);
+        if (previousStatus != null) {
+            // Если игрок вышел во время отсчета или дуэли, убеждаемся, что все данные сброшены
+            if (previousStatus.equals("CANCELLED_BY_QUIT")) {
+                // Принудительно очищаем все данные дуэли для игрока
+                plugin.getDuelManager().cleanupPlayerState(playerId);
+
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().info("Очищено состояние дуэли для игрока " +
+                            player.getName() + " после предыдущего выхода");
+                }
+            }
+        }
 
         // Обрабатываем телепортацию из мира дуэлей
         Bukkit.getScheduler().runTaskLater(plugin, () -> {

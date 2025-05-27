@@ -36,10 +36,24 @@ public class DuelQuitListener implements Listener {
         Player player = event.getPlayer();
         UUID playerId = player.getUniqueId();
 
-        // Если игрок в дуэли, сохраняем его текущее местоположение
+        // Проверяем и сохраняем состояние игрока при выходе
         if (plugin.getDuelManager().isPlayerInDuel(playerId)) {
             // Сохраняем локацию при выходе
             plugin.getDuelManager().savePlayerLocation(player);
+        }
+
+        // Проверяем, находится ли игрок в отсчете перед дуэлью
+        if (plugin.getDuelManager().isPlayerInCountdown(playerId)) {
+            // ВАЖНОЕ ИЗМЕНЕНИЕ: Для игрока в отсчете перед дуэлью
+            plugin.getDuelManager().unfreezeAndCancelDuel(player);
+
+            // Логируем действие
+            if (plugin.getConfig().getBoolean("debug", true)) {
+                plugin.getLogger().info("Игрок " + player.getName() +
+                        " вышел во время отсчета перед дуэлью. Дуэль отменена.");
+            }
+
+            return; // Выходим, чтобы не выполнять другие действия
         }
 
         // Проверяем, находится ли игрок в мире дуэлей

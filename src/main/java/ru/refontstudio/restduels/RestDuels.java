@@ -142,6 +142,8 @@ public final class RestDuels extends JavaPlugin {
         // Регистрируем защитник меню
         commandBlocker = new CommandBlocker(this);
         getServer().getPluginManager().registerEvents(new DuelRestrictionListener(this), this);
+        // Регистрация слушателя блокировки команд
+        getServer().getPluginManager().registerEvents(new DuelCommandBlocker(this), this);
         getServer().getPluginManager().registerEvents(commandBlocker, this);
         MenuProtectionListener menuProtectionListener = new MenuProtectionListener(this);
         getServer().getPluginManager().registerEvents(menuProtectionListener, this);

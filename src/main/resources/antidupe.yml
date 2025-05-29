@@ -12,6 +12,24 @@ block-inventory-close-during-duel: false
 # Блокировать подбор предметов во время подготовки к дуэли
 block-item-pickup-during-preparation: true
 
+# Настройки блокировки команд
+block-commands:
+  # Блокировать команды во время подготовки к дуэли
+  during-preparation: true
+
+  # Блокировать команды во время окончания дуэли
+  during-end: true
+
+  # Список разрешенных команд (можно использовать в любой фазе дуэли)
+  allowed-commands:
+    - "/spawn"
+    - "/tp"
+    - "/тп"
+    - "/forfeit"
+    - "/ff"
+    - "/surrender"
+    - "/сдаться"
+
 # Список запрещенных предметов
 blocked-items:
   - EXPERIENCE_BOTTLE

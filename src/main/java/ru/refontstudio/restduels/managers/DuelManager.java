@@ -65,6 +65,7 @@ public class DuelManager {
     private final Map<DuelType, List<UUID>> queuedPlayers = new HashMap<>();
     public final Map<UUID, BossBar> playerBossBars = new HashMap<>();
     private final Map<UUID, BukkitTask> searchTasks = new HashMap<>();
+    private final Set<UUID> playersInEndPhase = new HashSet<>();
     private final Map<UUID, Long> lastTeleportTimes = new HashMap<>();
     private final Map<UUID, BukkitTask> delayedReturnTasks = new HashMap<>();
     private final Map<UUID, Arena> playerArenas = new HashMap<>();
@@ -924,6 +925,21 @@ public class DuelManager {
                 plugin.getLogger().severe("Ошибка при телепортации игрока " + player.getName() + ": " + e.getMessage());
             }
         }
+    }
+
+    // Метод для добавления игрока в фазу окончания (вызывать, когда дуэль заканчивается)
+    public void addPlayerToEndPhase(UUID playerId) {
+        playersInEndPhase.add(playerId);
+    }
+
+    // Метод для удаления игрока из фазы окончания (вызывать, когда игрок полностью выходит из дуэли)
+    public void removePlayerFromEndPhase(UUID playerId) {
+        playersInEndPhase.remove(playerId);
+    }
+
+    // Проверка, находится ли игрок в фазе окончания
+    public boolean isPlayerInEndPhase(UUID playerId) {
+        return playersInEndPhase.contains(playerId);
     }
 
     // Метод для сохранения оригинального инвентаря

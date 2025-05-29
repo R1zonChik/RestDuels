@@ -4,14 +4,16 @@ import org.bukkit.Material;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.ThrownExpBottle;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.entity.ExpBottleEvent;
+import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
-import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.inventory.InventoryType;
@@ -67,8 +69,8 @@ public class DuelRestrictionListener implements Listener {
 
         // Загружаем настройки блокировки
         blockExpBottles = config.getBoolean("block-exp-bottles", true);
-        blockItemDrop = config.getBoolean("block-item-drop", true);
-        blockInventoryClose = config.getBoolean("block-inventory-close-during-duel", true);
+        blockItemDrop = config.getBoolean("block-item-drop", false);
+        blockInventoryClose = config.getBoolean("block-inventory-close-during-duel", false);
         blockItemPickup = config.getBoolean("block-item-pickup-during-preparation", true);
 
         // Загружаем запрещенные предметы
@@ -127,7 +129,7 @@ public class DuelRestrictionListener implements Listener {
     }
 
     /**
-     * Блокирует использование бутылок опыта и других предметов
+     * Блокирует использование бутылок опыта через правый клик
      */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPlayerInteract(PlayerInteractEvent event) {
@@ -139,10 +141,11 @@ public class DuelRestrictionListener implements Listener {
         ItemStack item = event.getItem();
         if (item == null) return;
 
-        // Проверяем использование бутылочек опыта
+        // Блокируем использование бутылочек опыта
         if (blockExpBottles && item.getType() == Material.EXPERIENCE_BOTTLE &&
                 (event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK)) {
             event.setCancelled(true);
+            event.getPlayer().updateInventory(); // Принудительно обновляем инвентарь
             player.sendMessage(ColorUtils.colorize(
                     plugin.getConfig().getString("messages.prefix") +
                             "&cИспользование бутылочек опыта запрещено в мире дуэлей!"));
@@ -159,6 +162,43 @@ public class DuelRestrictionListener implements Listener {
                         plugin.getConfig().getString("messages.prefix") +
                                 "&cИспользование этого предмета запрещено в мире дуэлей!"));
             }
+        }
+    }
+
+    /**
+     * Блокирует бросание бутылочек опыта
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onProjectileLaunch(ProjectileLaunchEvent event) {
+        if (!(event.getEntity() instanceof ThrownExpBottle)) return;
+
+        if (!(event.getEntity().getShooter() instanceof Player)) return;
+
+        Player player = (Player) event.getEntity().getShooter();
+
+        if (isInDuelWorld(player) && blockExpBottles) {
+            event.setCancelled(true);
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "&cИспользование бутылочек опыта запрещено в мире дуэлей!"));
+        }
+    }
+
+    /**
+     * Блокирует разбивание бутылочек опыта
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onExpBottleBreak(ExpBottleEvent event) {
+        if (!(event.getEntity().getShooter() instanceof Player)) return;
+
+        Player player = (Player) event.getEntity().getShooter();
+
+        if (isInDuelWorld(player) && blockExpBottles) {
+            event.setCancelled(true);
+            event.setExperience(0); // На случай, если отмена события не сработает
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "&cИспользование бутылочек опыта запрещено в мире дуэлей!"));
         }
     }
 
@@ -250,126 +290,5 @@ public class DuelRestrictionListener implements Listener {
                     plugin.getConfig().getString("messages.prefix") +
                             "&cУпотребление этого предмета запрещено в мире дуэлей!"));
         }
-    }
-
-    /**
-     * Блокирует определенные взаимодействия с инвентарем, которые могут привести к дюпу
-     */
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onInventoryClick(InventoryClickEvent event) {
-        if (!(event.getWhoClicked() instanceof Player)) return;
-        Player player = (Player) event.getWhoClicked();
-
-        if (!isInDuelWorld(player)) return;
-
-        // Блокируем быстрые перемещения предметов между инвентарями
-        if (event.isShiftClick() && blockedInventories.contains(event.getInventory().getType())) {
-            event.setCancelled(true);
-            player.sendMessage(ColorUtils.colorize(
-                    plugin.getConfig().getString("messages.prefix") +
-                            "&cБыстрое перемещение предметов запрещено в этом инвентаре!"));
-            return;
-        }
-
-        // Блокируем перемещения с цифровыми клавишами
-        if (event.getHotbarButton() != -1 && blockedInventories.contains(event.getInventory().getType())) {
-            event.setCancelled(true);
-            player.sendMessage(ColorUtils.colorize(
-                    plugin.getConfig().getString("messages.prefix") +
-                            "&cНельзя использовать горячие клавиши для перемещения предметов!"));
-        }
-    }
-
-    /**
-     * Блокирует действия после телепортации
-     */
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onPostTeleportInteract(PlayerInteractEvent event) {
-        Player player = event.getPlayer();
-
-        // Загружаем время задержки из конфигурации
-        int teleportCooldown = plugin.getConfig().getInt("anti-dupe.teleport-cooldown", 3000);
-
-        // Проверяем, прошло ли достаточно времени с последней телепортации
-        if (!plugin.getDuelManager().isTeleportCooldownOver(player.getUniqueId(), teleportCooldown)) {
-            event.setCancelled(true);
-
-            // Отправляем сообщение, но не чаще чем раз в секунду
-            long now = System.currentTimeMillis();
-            if (!lastMessageTimes.containsKey(player.getUniqueId()) ||
-                    now - lastMessageTimes.getOrDefault(player.getUniqueId(), 0L) > 1000) {
-
-                player.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                "&cПодождите немного после телепортации!"));
-
-                lastMessageTimes.put(player.getUniqueId(), now);
-            }
-        }
-    }
-
-    /**
-     * Блокирует выбрасывание предметов после телепортации
-     */
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onPostTeleportDrop(PlayerDropItemEvent event) {
-        Player player = event.getPlayer();
-
-        // Загружаем время задержки для выбрасывания предметов
-        int dropCooldown = plugin.getConfig().getInt("anti-dupe.drop-cooldown-after-teleport", 5000);
-
-        // Проверяем, прошло ли достаточно времени с последней телепортации
-        if (!plugin.getDuelManager().isTeleportCooldownOver(player.getUniqueId(), dropCooldown)) {
-            event.setCancelled(true);
-
-            // Отправляем сообщение, но не чаще чем раз в секунду
-            long now = System.currentTimeMillis();
-            if (!lastMessageTimes.containsKey(player.getUniqueId()) ||
-                    now - lastMessageTimes.getOrDefault(player.getUniqueId(), 0L) > 1000) {
-
-                player.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                "&cВы не можете выбрасывать предметы сразу после телепортации!"));
-
-                lastMessageTimes.put(player.getUniqueId(), now);
-            }
-        }
-    }
-
-    /**
-     * Блокирует открытие контейнеров после телепортации
-     */
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onPostTeleportInventoryOpen(InventoryOpenEvent event) {
-        if (!(event.getPlayer() instanceof Player)) return;
-        Player player = (Player) event.getPlayer();
-
-        // Загружаем время задержки для открытия контейнеров
-        int containerCooldown = plugin.getConfig().getInt("anti-dupe.container-cooldown-after-teleport", 5000);
-
-        // Проверяем, является ли инвентарь контейнером
-        if (isContainer(event.getInventory().getType())) {
-            // Проверяем, прошло ли достаточно времени с последней телепортации
-            if (!plugin.getDuelManager().isTeleportCooldownOver(player.getUniqueId(), containerCooldown)) {
-                event.setCancelled(true);
-
-                player.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                "&cВы не можете открывать контейнеры сразу после телепортации!"));
-            }
-        }
-    }
-
-    /**
-     * Проверяет, является ли тип инвентаря контейнером
-     */
-    private boolean isContainer(InventoryType type) {
-        return type == InventoryType.CHEST ||
-                type == InventoryType.ENDER_CHEST ||
-                type == InventoryType.SHULKER_BOX ||
-                type == InventoryType.BARREL ||
-                type == InventoryType.HOPPER ||
-                type == InventoryType.DISPENSER ||
-                type == InventoryType.DROPPER;
     }
 }

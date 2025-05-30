@@ -1,6 +1,7 @@
 package ru.refontstudio.restduels.listeners;
 
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -8,7 +9,11 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.inventory.ItemStack;
 import ru.refontstudio.restduels.RestDuels;
+import ru.refontstudio.restduels.models.Duel;
+import ru.refontstudio.restduels.models.DuelType;
+import ru.refontstudio.restduels.utils.ColorUtils;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -18,6 +23,11 @@ public class DuelDeathListener implements Listener {
     private final RestDuels plugin;
     private final Map<UUID, Location> pendingRespawns = new HashMap<>();
     private final Map<UUID, Long> lastRespawnTime = new HashMap<>();
+
+    // Кеш для сохранения инвентаря умерших игроков в Ranked дуэлях
+    private final Map<UUID, ItemStack[]> rankedDeathInventories = new HashMap<>();
+    private final Map<UUID, ItemStack[]> rankedDeathArmor = new HashMap<>();
+    private final Map<UUID, ItemStack[]> rankedDeathExtraContents = new HashMap<>();
 
     public DuelDeathListener(RestDuels plugin) {
         this.plugin = plugin;
@@ -34,11 +44,44 @@ public class DuelDeathListener implements Listener {
             return;
         }
 
+        // Проверяем, находится ли игрок в мире дуэлей
         if (!plugin.getConfig().getStringList("worlds.duel-worlds").contains(
                 player.getWorld().getName().toLowerCase())) {
             return;
         }
 
+        // Получаем дуэль, в которой участвует игрок
+        Duel duel = plugin.getDuelManager().getPlayerDuel(playerId);
+
+        // Если это Ranked дуэль, сохраняем инвентарь для моментального восстановления
+        if (duel != null && duel.getType() == DuelType.RANKED) {
+            // Моментально сохраняем текущий инвентарь перед любыми изменениями
+            savePlayerInventoryForRankedDuel(player);
+
+            // Отменяем выпадение предметов
+            event.setKeepInventory(true);
+            event.getDrops().clear();
+            event.setKeepLevel(true);
+            event.setDroppedExp(0);
+
+            // Отправляем сообщение игроку
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "&cВы проиграли дуэль! Ваш инвентарь будет восстановлен после возрождения."));
+
+            // Получаем противника
+            UUID opponentId = duel.getPlayer1Id().equals(playerId) ? duel.getPlayer2Id() : duel.getPlayer1Id();
+            Player opponent = Bukkit.getPlayer(opponentId);
+
+            // Оповещаем победителя
+            if (opponent != null && opponent.isOnline()) {
+                opponent.sendMessage(ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") +
+                                "&aВы победили в дуэли без потерь! Противник сохранит свой инвентарь."));
+            }
+        }
+
+        // Сохраняем исходную локацию для будущего респавна
         Location originalLocation = plugin.getDuelManager().getOriginalLocation(playerId);
         if (originalLocation != null && originalLocation.getWorld() != null) {
             pendingRespawns.put(playerId, originalLocation);
@@ -71,16 +114,116 @@ public class DuelDeathListener implements Listener {
                     plugin.getLogger().info("Установлена локация респавна для игрока " + player.getName() +
                             " на " + respawnLocation.getWorld().getName());
                 }
-
-                // Удаляем запись, т.к. мы уже обработали респавн
-                pendingRespawns.remove(playerId);
             } else {
                 // Локация в мире дуэлей - используем спавн основного мира
-                // Но НЕ делаем вторичную телепортацию!
                 if (plugin.getConfig().getBoolean("debug", false)) {
                     plugin.getLogger().info("Локация респавна в мире дуэлей, используем стандартный респавн");
                 }
-                pendingRespawns.remove(playerId);
+            }
+
+            // Удаляем запись, т.к. мы уже обработали респавн
+            pendingRespawns.remove(playerId);
+
+            // Проверяем, есть ли сохраненный инвентарь для Ranked дуэлей, и восстанавливаем его НЕМЕДЛЕННО
+            if (rankedDeathInventories.containsKey(playerId)) {
+                // Моментальное восстановление инвентаря непосредственно в этом событии
+                // без создания дополнительных задержек
+                restoreRankedDuelInventory(player);
+            }
+        }
+    }
+
+    private void savePlayerInventoryForRankedDuel(Player player) {
+        UUID playerId = player.getUniqueId();
+
+        // Создаем глубокие копии всего содержимого инвентаря
+        ItemStack[] mainInv = new ItemStack[player.getInventory().getContents().length];
+        ItemStack[] armorInv = new ItemStack[player.getInventory().getArmorContents().length];
+
+        // Копируем каждый предмет отдельно для избежания ссылочных проблем
+        for (int i = 0; i < player.getInventory().getContents().length; i++) {
+            ItemStack item = player.getInventory().getContents()[i];
+            if (item != null) mainInv[i] = item.clone();
+        }
+
+        for (int i = 0; i < player.getInventory().getArmorContents().length; i++) {
+            ItemStack item = player.getInventory().getArmorContents()[i];
+            if (item != null) armorInv[i] = item.clone();
+        }
+
+        // Сохраняем копии
+        rankedDeathInventories.put(playerId, mainInv);
+        rankedDeathArmor.put(playerId, armorInv);
+
+        // Для новых версий Minecraft сохраняем дополнительные слоты (оффхенд и др.)
+        try {
+            ItemStack[] extraInv = new ItemStack[player.getInventory().getExtraContents().length];
+            for (int i = 0; i < player.getInventory().getExtraContents().length; i++) {
+                ItemStack item = player.getInventory().getExtraContents()[i];
+                if (item != null) extraInv[i] = item.clone();
+            }
+            rankedDeathExtraContents.put(playerId, extraInv);
+        } catch (NoSuchMethodError e) {
+            // Для совместимости со старыми версиями Bukkit
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().warning("Невозможно сохранить дополнительные слоты инвентаря: " + e.getMessage());
+            }
+        }
+
+        if (plugin.getConfig().getBoolean("debug", false)) {
+            plugin.getLogger().info("Сохранен инвентарь игрока " + player.getName() + " для Ranked дуэли");
+        }
+    }
+
+    /**
+     * Восстанавливает инвентарь игрока после смерти в Ranked дуэли
+     * @param player Игрок для восстановления инвентаря
+     */
+    private void restoreRankedDuelInventory(Player player) {
+        UUID playerId = player.getUniqueId();
+
+        // Проверяем, есть ли сохраненный инвентарь
+        if (rankedDeathInventories.containsKey(playerId)) {
+            try {
+                // Очищаем текущий инвентарь
+                player.getInventory().clear();
+
+                // Восстанавливаем ранее сохраненные предметы
+                player.getInventory().setContents(rankedDeathInventories.get(playerId));
+                player.getInventory().setArmorContents(rankedDeathArmor.get(playerId));
+
+                // Восстанавливаем дополнительные слоты
+                try {
+                    if (rankedDeathExtraContents.containsKey(playerId)) {
+                        player.getInventory().setExtraContents(rankedDeathExtraContents.get(playerId));
+                    }
+                } catch (NoSuchMethodError e) {
+                    // Игнорируем ошибку для совместимости со старыми версиями
+                }
+
+                // Обновляем инвентарь игрока
+                player.updateInventory();
+
+                // Устанавливаем режим выживания, если игрок был в другом режиме
+                player.setGameMode(GameMode.SURVIVAL);
+
+                // Отправляем сообщение игроку (ТОЛЬКО ЗДЕСЬ, убрано из onPlayerRespawn)
+                player.sendMessage(ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") +
+                                "&aВаш инвентарь был успешно восстановлен после ранговой дуэли!"));
+
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().info("Восстановлен инвентарь игрока " + player.getName() + " после Ranked дуэли");
+                }
+            } catch (Exception e) {
+                plugin.getLogger().severe("Ошибка при восстановлении инвентаря игрока " +
+                        player.getName() + ": " + e.getMessage());
+                e.printStackTrace();
+            } finally {
+                // Удаляем сохраненные данные
+                rankedDeathInventories.remove(playerId);
+                rankedDeathArmor.remove(playerId);
+                rankedDeathExtraContents.remove(playerId);
             }
         }
     }

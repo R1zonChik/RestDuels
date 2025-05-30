@@ -22,13 +22,7 @@ block-commands:
 
   # Список разрешенных команд (можно использовать в любой фазе дуэли)
   allowed-commands:
-    - "/spawn"
-    - "/tp"
-    - "/тп"
-    - "/forfeit"
-    - "/ff"
-    - "/surrender"
-    - "/сдаться"
+    - "/duel"
 
 # Список запрещенных предметов
 blocked-items:

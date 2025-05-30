@@ -8,8 +8,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.PluginCommand;
-import org.bukkit.event.player.PlayerDropItemEvent;
-import org.bukkit.plugin.Plugin;
+import org.bukkit.scheduler.BukkitTask;
 import ru.refontstudio.restduels.RestDuels;
 import ru.refontstudio.restduels.utils.ColorUtils;
 
@@ -19,31 +18,52 @@ import java.util.concurrent.ConcurrentHashMap;
 public class CommandBlocker implements Listener {
     private final RestDuels plugin;
     private final Set<String> allowedCommands = new HashSet<>();
+    private final Set<String> alwaysBlockedCommands = new HashSet<>();
+    private final List<String> duelWorlds;
     private boolean protocolLibEnabled = false;
 
-    // ДОБАВЛЕНО: Статический экземпляр для доступа из других классов
+    // Статический экземпляр для доступа из других классов
     private static CommandBlocker instance;
 
-    // ДОБАВЛЕНО: Множество игроков, для которых команды заблокированы
+    // Хранит UUID игроков, которым сейчас показывается ActionBar
+    private final Set<UUID> actionBarActive = ConcurrentHashMap.newKeySet();
+
+    // Кеш задач ActionBar для отмены
+    private final Map<UUID, BukkitTask> actionBarTasks = new ConcurrentHashMap<>();
+
+    // Множество игроков, для которых команды заблокированы
     private final Set<UUID> blockedPlayers = ConcurrentHashMap.newKeySet();
 
     public CommandBlocker(RestDuels plugin) {
         this.plugin = plugin;
-        instance = this; // Сохраняем экземпляр
+        instance = this;
+
+        // Загружаем список миров дуэлей
+        duelWorlds = plugin.getConfig().getStringList("worlds.duel-worlds");
+        if (duelWorlds.isEmpty()) {
+            duelWorlds.add("duels");
+        }
 
         // Загружаем разрешенные команды
         loadAllowedCommands();
 
+        // Добавляем команды, всегда блокируемые в мире дуэлей
+        alwaysBlockedCommands.add("/ec");
+        alwaysBlockedCommands.add("/enderchest");
+        alwaysBlockedCommands.add("/echest");
+        alwaysBlockedCommands.add("/eechest");
+        alwaysBlockedCommands.add("/endersee");
+        alwaysBlockedCommands.add("/enderview");
+        alwaysBlockedCommands.add("/ender");
+
         // Проверяем наличие ProtocolLib
         if (Bukkit.getPluginManager().isPluginEnabled("ProtocolLib")) {
             try {
-                // Пытаемся инициализировать ProtocolLib
                 initProtocolLib();
                 protocolLibEnabled = true;
                 plugin.getLogger().info("ProtocolLib найден и активирован для блокировки команд");
             } catch (Exception e) {
                 plugin.getLogger().warning("Ошибка при инициализации ProtocolLib: " + e.getMessage());
-                plugin.getLogger().warning("Будет использована стандартная блокировка команд");
             }
         } else {
             plugin.getLogger().warning("ProtocolLib не найден! Будет использована стандартная блокировка команд.");
@@ -51,6 +71,23 @@ public class CommandBlocker implements Listener {
 
         // Отключаем проблемные команды
         disableProblematicCommands();
+
+        // Отключаем другие обработчики команд для избежания дублирования
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            try {
+                // Находим другие слушатели и отключаем их
+                Bukkit.getPluginManager().registerEvents(this, plugin);
+            } catch (Exception e) {
+                plugin.getLogger().warning("Ошибка при настройке слушателей: " + e.getMessage());
+            }
+        }, 5L);
+    }
+
+    /**
+     * Проверяет, находится ли игрок в мире дуэлей
+     */
+    private boolean isInDuelWorld(Player player) {
+        return duelWorlds.contains(player.getWorld().getName().toLowerCase());
     }
 
     /**
@@ -67,9 +104,6 @@ public class CommandBlocker implements Listener {
      */
     public void addPlayer(UUID playerId) {
         blockedPlayers.add(playerId);
-        if (plugin.getConfig().getBoolean("debug", false)) {
-            plugin.getLogger().info("Команды заблокированы для игрока " + playerId);
-        }
     }
 
     /**
@@ -78,9 +112,6 @@ public class CommandBlocker implements Listener {
      */
     public void removePlayer(UUID playerId) {
         blockedPlayers.remove(playerId);
-        if (plugin.getConfig().getBoolean("debug", false)) {
-            plugin.getLogger().info("Команды разблокированы для игрока " + playerId);
-        }
     }
 
     /**
@@ -96,33 +127,69 @@ public class CommandBlocker implements Listener {
      * Очищает всех игроков из списка заблокированных команд
      */
     public void clearAllPlayers() {
-        // Копируем список, чтобы избежать ConcurrentModificationException
-        Set<UUID> playersCopy = new HashSet<>(blockedPlayers);
-
-        // Удаляем всех игроков из списка
-        for (UUID playerId : playersCopy) {
-            removePlayer(playerId);
-        }
-
-        // Очищаем список
         blockedPlayers.clear();
-
-        plugin.getLogger().info("Все игроки удалены из CommandBlocker.");
     }
 
     /**
-     * Инициализирует ProtocolLib (в отдельном методе для обработки исключений)
+     * Показывает сообщение в ActionBar вместо обычного чата
+     * Это предотвращает спам в чате при повторных командах
+     * @param player Игрок для отображения
+     * @param message Сообщение для отображения
+     */
+    private void showActionBarMessage(Player player, String message) {
+        UUID playerId = player.getUniqueId();
+
+        // Если у игрока уже активно сообщение, отменяем его
+        BukkitTask existingTask = actionBarTasks.get(playerId);
+        if (existingTask != null) {
+            existingTask.cancel();
+        }
+
+        // Если сообщение уже отображается, не показываем новое
+        if (actionBarActive.contains(playerId)) {
+            return;
+        }
+
+        // Добавляем игрока в список активных ActionBar
+        actionBarActive.add(playerId);
+
+        // Отправляем ActionBar сообщение
+        try {
+            // Используем методы NMS или другой API для отображения ActionBar
+            // В зависимости от версии сервера
+            if (Bukkit.getVersion().contains("1.16") || Bukkit.getVersion().contains("1.17") ||
+                    Bukkit.getVersion().contains("1.18") || Bukkit.getVersion().contains("1.19")) {
+                player.spigot().sendMessage(net.md_5.bungee.api.ChatMessageType.ACTION_BAR,
+                        net.md_5.bungee.api.chat.TextComponent.fromLegacyText(ColorUtils.colorize(message)));
+            } else {
+                // Для более старых версий - обычное сообщение
+                player.sendMessage(ColorUtils.colorize(message));
+            }
+        } catch (Exception e) {
+            // Если не удалось отправить через ActionBar, отправляем обычное сообщение
+            player.sendMessage(ColorUtils.colorize(message));
+        }
+
+        // Планируем задачу для удаления игрока из списка активных
+        BukkitTask task = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            actionBarActive.remove(playerId);
+            actionBarTasks.remove(playerId);
+        }, 40L); // 2 секунды
+
+        // Сохраняем задачу для возможной отмены
+        actionBarTasks.put(playerId, task);
+    }
+
+    /**
+     * Инициализирует ProtocolLib
      */
     private void initProtocolLib() {
-        // Загружаем класс ProtocolLibIntegration динамически
         try {
             Class.forName("ru.refontstudio.restduels.integrations.ProtocolLibIntegration")
                     .getConstructor(RestDuels.class, CommandBlocker.class)
                     .newInstance(plugin, this);
-
             plugin.getLogger().info("ProtocolLib интеграция успешно инициализирована");
         } catch (Exception e) {
-            plugin.getLogger().warning("Не удалось инициализировать ProtocolLib: " + e.getMessage());
             throw new RuntimeException("Ошибка инициализации ProtocolLib", e);
         }
     }
@@ -132,23 +199,18 @@ public class CommandBlocker implements Listener {
      */
     public void loadAllowedCommands() {
         allowedCommands.clear();
-
-        // Добавляем стандартные разрешенные команды
         allowedCommands.add("/hub");
-        allowedCommands.add("/duel return"); // Добавляем команду досрочного возврата
+        allowedCommands.add("/duel return");
 
-        // Загружаем дополнительные команды из конфига, если они есть
         if (plugin.getConfig().contains("commands.allowed-during-duel")) {
             for (String cmd : plugin.getConfig().getStringList("commands.allowed-during-duel")) {
                 allowedCommands.add(cmd.toLowerCase());
             }
         }
 
-        // Добавляем альтернативные варианты команд (с / и без /)
         Set<String> additionalCommands = new HashSet<>();
         for (String cmd : allowedCommands) {
             if (cmd.startsWith("/")) {
-                // Для команд с аргументами, добавляем только базовую команду
                 String baseCmd = cmd.split(" ")[0];
                 additionalCommands.add(baseCmd.substring(1));
             } else {
@@ -157,57 +219,59 @@ public class CommandBlocker implements Listener {
         }
         allowedCommands.addAll(additionalCommands);
 
-        // Логируем загруженные команды
-        plugin.getLogger().info("Загружено " + allowedCommands.size() + " разрешенных команд во время дуэли: " +
-                String.join(", ", allowedCommands));
+        plugin.getLogger().info("Загружено " + allowedCommands.size() + " разрешенных команд во время дуэли");
     }
 
     /**
      * Отключает команды, которые работают во время дуэли
      */
     public void disableProblematicCommands() {
-        // Список команд, которые нужно отключить
         List<String> problematicCommands = Arrays.asList(
-                "spawn", "tpa", "home", "tp", "teleport", "warp", "back", "rtp", "wild", "tpaccept"
+                "spawn", "tpa", "home", "tp", "teleport", "warp", "back", "rtp", "wild", "tpaccept",
+                "enderchest", "ec", "echest", "endersee"
         );
 
         for (String cmdName : problematicCommands) {
             try {
-                // Получаем команду напрямую из плагина
                 PluginCommand command = Bukkit.getPluginCommand(cmdName);
                 if (command != null) {
-                    // Сохраняем оригинальный исполнитель
                     CommandExecutor originalExecutor = command.getExecutor();
-
-                    // Создаем ссылку на основной плагин для использования в анонимном классе
                     final RestDuels mainPlugin = this.plugin;
 
-                    // Устанавливаем нового исполнителя, который блокирует команду во время дуэли
                     CommandExecutor blockingExecutor = (sender, cmd, label, args) -> {
                         if (sender instanceof Player) {
                             Player player = (Player) sender;
+
+                            // Блокируем /ec всегда в мире дуэлей
+                            if ((cmdName.equals("enderchest") || cmdName.equals("ec") ||
+                                    cmdName.equals("echest") || cmdName.equals("endersee")) &&
+                                    isInDuelWorld(player)) {
+
+                                showActionBarMessage(player,
+                                        mainPlugin.getConfig().getString("messages.prefix") +
+                                                "&cЭта команда запрещена в мире дуэлей!");
+                                return true;
+                            }
+
+                            // В дуэли блокируем все остальные команды
                             if (mainPlugin.getDuelManager().isPlayerInDuel(player.getUniqueId()) ||
                                     mainPlugin.getDuelManager().isPlayerFrozen(player.getUniqueId())) {
 
-                                // Блокируем команду
-                                player.sendMessage(ColorUtils.colorize(
+                                showActionBarMessage(player,
                                         mainPlugin.getConfig().getString("messages.prefix") +
-                                                "&cКоманды заблокированы во время дуэли!"));
+                                                "&cКоманды заблокированы во время дуэли!");
                                 return true;
                             }
                         }
 
-                        // Если не в дуэли или не игрок, вызываем оригинальный исполнитель
                         if (originalExecutor != null) {
                             return originalExecutor.onCommand(sender, cmd, label, args);
                         }
                         return false;
                     };
 
-                    // Устанавливаем нового исполнителя
                     command.setExecutor(blockingExecutor);
-
-                    plugin.getLogger().info("Команда /" + cmdName + " переопределена для блокировки во время дуэли");
+                    plugin.getLogger().info("Команда /" + cmdName + " переопределена для блокировки");
                 }
             } catch (Exception e) {
                 plugin.getLogger().warning("Не удалось переопределить команду /" + cmdName + ": " + e.getMessage());
@@ -217,17 +281,32 @@ public class CommandBlocker implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlayerCommand(PlayerCommandPreprocessEvent event) {
+        if (event.isCancelled()) return;
+
         Player player = event.getPlayer();
+        String command = event.getMessage().toLowerCase();
+        String baseCmd = command.split(" ")[0];
 
-        // Если игрок находится в списке заблокированных
-        if (blockedPlayers.contains(player.getUniqueId())) {
-            // Проверяем, находится ли игрок в поиске дуэли (а не в активной дуэли)
-            if (plugin.getDuelManager().isPlayerSearchingDuel(player.getUniqueId())) {
-                // Если в поиске, разрешаем команды
-                return;
+        // Всегда блокируем EC в мире дуэлей
+        if (isInDuelWorld(player)) {
+            for (String blockedCmd : alwaysBlockedCommands) {
+                if (baseCmd.equalsIgnoreCase(blockedCmd)) {
+                    // Блокируем команду
+                    event.setCancelled(true);
+                    showActionBarMessage(player,
+                            plugin.getConfig().getString("messages.prefix") +
+                                    "&cЭта команда запрещена в мире дуэлей!");
+                    return;
+                }
             }
+        }
 
-            String command = event.getMessage().toLowerCase();
+        // Если игрок находится в списке блокированных
+        if (blockedPlayers.contains(player.getUniqueId())) {
+            // Проверяем, находится ли игрок в поиске дуэли
+            if (plugin.getDuelManager().isPlayerSearchingDuel(player.getUniqueId())) {
+                return; // Если в поиске, разрешаем команды
+            }
 
             // Если команда разрешена, пропускаем
             if (isCommandAllowed(command)) {
@@ -236,9 +315,9 @@ public class CommandBlocker implements Listener {
 
             // Отменяем выполнение команды
             event.setCancelled(true);
-            player.sendMessage(ColorUtils.colorize(
+            showActionBarMessage(player,
                     plugin.getConfig().getString("messages.prefix") +
-                            "&cВы не можете использовать команды во время дуэли!"));
+                            "&cВы не можете использовать команды во время дуэли!");
         }
     }
 
@@ -253,12 +332,12 @@ public class CommandBlocker implements Listener {
             command = "/" + command;
         }
 
-        // Проверяем точное совпадение (для команд с аргументами)
+        // Проверяем точное совпадение
         if (allowedCommands.contains(command)) {
             return true;
         }
 
-        // Проверяем базовую команду (без аргументов)
+        // Проверяем базовую команду
         String baseCmd = command.split(" ")[0];
         if (allowedCommands.contains(baseCmd)) {
             return true;
@@ -274,39 +353,25 @@ public class CommandBlocker implements Listener {
         return false;
     }
 
-    /**
-     * Получает список разрешенных команд
-     * @return Список разрешенных команд
-     */
     public Set<String> getAllowedCommands() {
         return new HashSet<>(allowedCommands);
     }
 
-    /**
-     * Добавляет команду в список разрешенных
-     * @param command Команда для добавления
-     */
     public void addAllowedCommand(String command) {
         command = command.toLowerCase();
         if (!command.startsWith("/")) {
             command = "/" + command;
         }
         allowedCommands.add(command);
-        allowedCommands.add(command.substring(1)); // Добавляем вариант без /
+        allowedCommands.add(command.substring(1));
     }
 
-
-
-    /**
-     * Удаляет команду из списка разрешенных
-     * @param command Команда для удаления
-     */
     public void removeAllowedCommand(String command) {
         command = command.toLowerCase();
         if (!command.startsWith("/")) {
             command = "/" + command;
         }
         allowedCommands.remove(command);
-        allowedCommands.remove(command.substring(1)); // Удаляем вариант без /
+        allowedCommands.remove(command.substring(1));
     }
 }

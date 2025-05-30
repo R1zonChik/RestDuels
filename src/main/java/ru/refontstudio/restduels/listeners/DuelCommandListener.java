@@ -21,12 +21,21 @@ public class DuelCommandListener implements Listener {
     private final RestDuels plugin;
     private final Set<String> allowedCommands;
     private final Set<String> blockedCommands;
+    private final Set<String> blockedWorldCommands; // Команды, блокируемые всегда в мирах дуэлей
+    private final List<String> duelWorlds; // Миры дуэлей
     private final Set<UUID> messageThrottling = ConcurrentHashMap.newKeySet(); // Для предотвращения спама сообщениями
 
     public DuelCommandListener(RestDuels plugin) {
         this.plugin = plugin;
         this.allowedCommands = new HashSet<>();
         this.blockedCommands = new HashSet<>();
+        this.blockedWorldCommands = new HashSet<>();
+
+        // Загружаем список миров дуэлей
+        this.duelWorlds = plugin.getConfig().getStringList("worlds.duel-worlds");
+        if (duelWorlds.isEmpty()) {
+            duelWorlds.add("duels");
+        }
 
         // Загружаем разрешенные команды из конфига
         List<String> configAllowed = plugin.getConfig().getStringList("commands.allowed-during-duel");
@@ -53,8 +62,15 @@ public class DuelCommandListener implements Listener {
             blockedCommands.addAll(configBlocked);
         }
 
+        // Команды, блокируемые всегда в мирах дуэлей
+        blockedWorldCommands.addAll(Arrays.asList(
+                "/ec", "/enderchest", "/echest", "/eechest", "/endersee", "/enderview",
+                "/ender", "/eechest"
+        ));
+
         plugin.getLogger().info("Загружено " + allowedCommands.size() + " разрешенных команд во время дуэли");
         plugin.getLogger().info("Загружено " + blockedCommands.size() + " заблокированных команд во время дуэли");
+        plugin.getLogger().info("Загружено " + blockedWorldCommands.size() + " команд, блокируемых всегда в мирах дуэлей");
 
         // Запускаем очистку списка throttling каждые 2 секунды
         Bukkit.getScheduler().runTaskTimer(plugin, this::clearMessageThrottling, 40L, 40L);
@@ -62,6 +78,13 @@ public class DuelCommandListener implements Listener {
 
     private void clearMessageThrottling() {
         messageThrottling.clear();
+    }
+
+    /**
+     * Проверяет, находится ли игрок в мире дуэлей
+     */
+    private boolean isInDuelWorld(Player player) {
+        return duelWorlds.contains(player.getWorld().getName().toLowerCase());
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
@@ -73,22 +96,6 @@ public class DuelCommandListener implements Listener {
         Player player = event.getPlayer();
         UUID playerId = player.getUniqueId();
 
-        // ДОБАВЛЕНО: Если у игрока есть отложенная задача возврата,
-        // значит дуэль уже завершена и он собирает ресурсы - разрешаем команды
-        if (plugin.getDuelManager().hasDelayedReturnTask(playerId)) {
-            return; // Разрешаем команду
-        }
-
-        // Проверяем, участвует ли игрок в дуэли
-        if (!plugin.getDuelManager().isPlayerInDuel(playerId)) {
-            return; // Игрок не в дуэли, разрешаем команду
-        }
-
-        // Игрок с правом bypass может использовать любые команды
-        if (player.hasPermission("restduels.bypass.commands")) {
-            return; // Разрешаем команду
-        }
-
         // Получаем сообщение и проверяем, является ли оно командой
         String message = event.getMessage().toLowerCase();
         if (!message.startsWith("/")) {
@@ -97,6 +104,41 @@ public class DuelCommandListener implements Listener {
 
         // Получаем команду без аргументов (первое слово после /)
         String baseCommand = message.split(" ")[0];
+
+        // ВСЕГДА блокируем определенные команды в мирах дуэлей
+        if (isInDuelWorld(player)) {
+            for (String blockedCmd : blockedWorldCommands) {
+                String blockedCmdLower = blockedCmd.toLowerCase();
+                if (baseCommand.equals(blockedCmdLower) || message.startsWith(blockedCmdLower + " ")) {
+                    event.setCancelled(true);
+
+                    // Предотвращаем спам сообщениями
+                    if (!messageThrottling.contains(playerId)) {
+                        messageThrottling.add(playerId);
+
+                        player.sendMessage(ColorUtils.colorize(
+                                plugin.getConfig().getString("messages.prefix") +
+                                        "&cЭта команда запрещена в мире дуэлей!"));
+                    }
+
+                    // Логируем блокировку, если включен режим отладки
+                    if (plugin.getConfig().getBoolean("debug", false)) {
+                        plugin.getLogger().info("Заблокирована мировая команда для " + player.getName() + ": " + message);
+                    }
+                    return;
+                }
+            }
+        }
+
+        // Далее проверяем, участвует ли игрок в дуэли
+        if (!plugin.getDuelManager().isPlayerInDuel(playerId)) {
+            return; // Игрок не в дуэли, разрешаем команду
+        }
+
+        // Игрок с правом bypass может использовать любые команды
+        if (player.hasPermission("restduels.bypass.commands")) {
+            return; // Разрешаем команду
+        }
 
         // Проверяем, является ли команда разрешенной
         boolean isAllowed = false;
@@ -122,7 +164,7 @@ public class DuelCommandListener implements Listener {
         if (isExplicitlyBlocked || !isAllowed) {
             event.setCancelled(true);
 
-            // ИЗМЕНЕНО: Проверяем, активна ли дуэль, и только тогда отправляем сообщение
+            // Проверяем, активна ли дуэль, и только тогда отправляем сообщение
             if (!messageThrottling.contains(playerId) && plugin.getDuelManager().isPlayerInDuel(playerId)) {
                 messageThrottling.add(playerId);
 

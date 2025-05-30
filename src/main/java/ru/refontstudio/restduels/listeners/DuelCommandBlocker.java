@@ -20,6 +20,7 @@ public class DuelCommandBlocker implements Listener {
 
     private final RestDuels plugin;
     private final Set<String> allowedCommands = new HashSet<>();
+    private final Set<String> alwaysBlockedCommands = new HashSet<>();
     private final Set<String> duelWorldNames = new HashSet<>();
     private boolean blockCommandsDuringPreparation;
     private boolean blockCommandsDuringEnd;
@@ -66,9 +67,19 @@ public class DuelCommandBlocker implements Listener {
             allowedCommands.addAll(configAllowedCommands);
         }
 
+        // Добавляем команды, которые всегда блокируются в мире дуэлей
+        alwaysBlockedCommands.add("/ec");
+        alwaysBlockedCommands.add("/enderchest");
+        alwaysBlockedCommands.add("/echest");
+        alwaysBlockedCommands.add("/eechest");
+        alwaysBlockedCommands.add("/endersee");
+        alwaysBlockedCommands.add("/enderview");
+        alwaysBlockedCommands.add("/ender");
+
         // Логируем загруженную конфигурацию в режиме отладки
         if (config.getBoolean("debug", false)) {
             plugin.getLogger().info("Загружены разрешенные команды: " + allowedCommands);
+            plugin.getLogger().info("Всегда блокируемые команды: " + alwaysBlockedCommands);
             plugin.getLogger().info("Блокировка команд во время подготовки: " + blockCommandsDuringPreparation);
             plugin.getLogger().info("Блокировка команд во время окончания: " + blockCommandsDuringEnd);
         }
@@ -113,6 +124,23 @@ public class DuelCommandBlocker implements Listener {
     }
 
     /**
+     * Проверяет, является ли команда в списке всегда блокируемых
+     */
+    private boolean isAlwaysBlocked(String command) {
+        // Преобразуем полную команду в основную команду
+        String baseCommand = command.split(" ")[0].toLowerCase();
+
+        // Проверяем, содержится ли команда в списке всегда блокируемых
+        for (String blockedCommand : alwaysBlockedCommands) {
+            if (baseCommand.equals(blockedCommand.toLowerCase())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Блокирует все команды, кроме разрешенных, во время подготовки и окончания дуэли
      */
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -121,6 +149,15 @@ public class DuelCommandBlocker implements Listener {
 
         // Проверяем, находится ли игрок в мире дуэлей
         if (!isInDuelWorld(player)) {
+            return;
+        }
+
+        // Сначала проверяем, является ли команда среди всегда блокируемых
+        if (isAlwaysBlocked(event.getMessage())) {
+            event.setCancelled(true);
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "&cЭта команда запрещена в мире дуэлей!"));
             return;
         }
 

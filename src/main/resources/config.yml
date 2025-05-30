@@ -219,7 +219,7 @@ messages:
   duel-lose: "&cВы проиграли в дуэли!"
   duel-cancelled: "&cДуэль отменена!"
   player-in-duel: "&cИгрок уже участвует в дуэли!"
-  search-started: "&aНачат поиск {type}! &7({time} сек)"
+  search-started: "&aНачат поиск {type} &7({time} сек)"
   duel-draw: "&eВремя дуэли истекло! &6Объявлена ничья."
   opponent-quit: "&aВы победили! Противник вышел с сервера."
   opponent-killed: "&aВы победили! Противник был убит."
@@ -239,7 +239,7 @@ messages:
   notify-menu-close: false
   delay-collect: "&eУ вас есть &c60 секунд &eдля сбора ресурсов."
   early-return-button: "&a[Телепортироваться досрочно]"
-  winner-collect: "У вас есть &c60 секунд &aдля сбора вещей."
+  winner-collect: "&eУ вас есть &c60 секунд &aдля сбора вещей."
   early-return-success: "&aВы были досрочно телепортированы на исходную позицию."
   early-return-active-duel: "&cВы не можете использовать досрочный возврат во время активной дуэли! Дождитесь окончания дуэли или используйте /hub."
   early-return-no-task: "&cУ вас нет активной задачи возврата."
@@ -398,7 +398,7 @@ titles:
     fadeOut: 10
   no-opponent:
     title: "&cСоперник не найден!"
-    subtitle: "&eВы возвращены на исходную позицию"
+    subtitle: "&eМожет это знак?"
     fadeIn: 10
     stay: 60
     fadeOut: 20
@@ -436,6 +436,28 @@ arena:
 
   # Проверять ли границы мгновенно при движении игрока
   instant-boundary-check: true
+
+# Настройки блокировки команд
+block-commands:
+  # Блокировать команды во время подготовки
+  during-preparation: true
+  # Блокировать команды во время окончания
+  during-end: true
+  # Список разрешенных команд
+  allowed-commands:
+    - /spawn
+    - /tp
+    - /тп
+    - /duel
+  # Команды, всегда блокируемые в мире дуэлей
+  always-blocked-world-commands:
+    - /ec
+    - /enderchest
+    - /echest
+    - /eechest
+    - /endersee
+    - /enderview
+    - /ender
 
 # Настройки оптимизации
 optimization:

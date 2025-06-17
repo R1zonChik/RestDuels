@@ -23,6 +23,7 @@ block-commands:
   # Список разрешенных команд (можно использовать в любой фазе дуэли)
   allowed-commands:
     - "/duel"
+    - "/duel cancel"
 
 # Список запрещенных предметов
 blocked-items:

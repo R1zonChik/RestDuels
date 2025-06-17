@@ -106,20 +106,16 @@ public class DuelCommandBlocker implements Listener {
         return plugin.getDuelManager().isPlayerInEndPhase(player.getUniqueId());
     }
 
-    /**
-     * Проверяет, является ли команда разрешенной
-     */
     private boolean isAllowedCommand(String command) {
-        // Преобразуем полную команду (например, "/spawn args") в основную команду ("/spawn")
-        String baseCommand = command.split(" ")[0].toLowerCase();
+        String lowerCommand = command.toLowerCase();
 
-        // Проверяем, содержится ли команда в списке разрешенных
+        // Проверяем полную команду с аргументами
         for (String allowedCommand : allowedCommands) {
-            if (baseCommand.equals(allowedCommand.toLowerCase())) {
+            if (lowerCommand.equals(allowedCommand.toLowerCase()) ||
+                    lowerCommand.startsWith(allowedCommand.toLowerCase() + " ")) {
                 return true;
             }
         }
-
         return false;
     }
 

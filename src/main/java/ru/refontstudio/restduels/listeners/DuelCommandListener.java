@@ -116,9 +116,10 @@ public class DuelCommandListener implements Listener {
                     if (!messageThrottling.contains(playerId)) {
                         messageThrottling.add(playerId);
 
-                        player.sendMessage(ColorUtils.colorize(
+                        // Заменяем чат на action bar
+                        showActionBarMessage(player,
                                 plugin.getConfig().getString("messages.prefix") +
-                                        "&cЭта команда запрещена в мире дуэлей!"));
+                                        "&cЭта команда запрещена в мире дуэлей!");
                     }
 
                     // Логируем блокировку, если включен режим отладки
@@ -171,14 +172,36 @@ public class DuelCommandListener implements Listener {
                 String blockMessage = plugin.getConfig().getString("messages.commands-blocked",
                         "&cВы не можете использовать команды во время дуэли!");
 
-                player.sendMessage(ColorUtils.colorize(
+                // Заменяем чат на action bar
+                showActionBarMessage(player,
                         plugin.getConfig().getString("messages.prefix") +
-                                blockMessage));
+                                blockMessage);
 
                 // Логируем блокировку, если включен режим отладки
                 if (plugin.getConfig().getBoolean("debug", false)) {
                     plugin.getLogger().info("Заблокирована команда для " + player.getName() + ": " + message);
                 }
+            }
+        }
+    }
+
+    /**
+     * Отображает сообщение в Action Bar игрока
+     * @param player Игрок, которому нужно отобразить сообщение
+     * @param message Сообщение для отображения (поддерживает цветовые коды)
+     */
+    private void showActionBarMessage(Player player, String message) {
+        message = ColorUtils.colorize(message);
+
+        try {
+            // Используем Spigot API для отправки Action Bar сообщения
+            player.spigot().sendMessage(net.md_5.bungee.api.ChatMessageType.ACTION_BAR,
+                    net.md_5.bungee.api.chat.TextComponent.fromLegacyText(message));
+        } catch (Exception e) {
+            // Если что-то пошло не так, отправляем в обычный чат
+            player.sendMessage(message);
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().warning("Не удалось отправить action bar: " + e.getMessage());
             }
         }
     }

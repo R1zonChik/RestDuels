@@ -7,8 +7,10 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerItemDamageEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerToggleFlightEvent;
+import org.bukkit.inventory.ItemStack;
 import ru.refontstudio.restduels.RestDuels;
 import ru.refontstudio.restduels.models.Duel;
 import ru.refontstudio.restduels.models.DuelType;
@@ -85,6 +87,22 @@ public class DuelListener implements Listener {
 
             // Завершаем дуэль с победителем
             plugin.getDuelManager().endDuel(duel, winnerId);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onPlayerItemDamage(PlayerItemDamageEvent event) {
+        Player player = event.getPlayer();
+        UUID playerId = player.getUniqueId();
+
+        // Проверяем, находится ли игрок в ранкед дуэли
+        if (plugin.getDuelManager().isPlayerInDuel(playerId)) {
+            Duel duel = plugin.getDuelManager().getPlayerDuel(playerId);
+
+            // Если это ранкед дуэль, отменяем повреждение предметов
+            if (duel != null && duel.getType() == DuelType.RANKED) {
+                event.setCancelled(true);
+            }
         }
     }
 

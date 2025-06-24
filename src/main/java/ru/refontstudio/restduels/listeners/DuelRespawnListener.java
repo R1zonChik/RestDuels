@@ -62,6 +62,17 @@ public class DuelRespawnListener implements Listener {
 
                 // Снимаем отметку
                 plugin.getDuelManager().unmarkPlayerForTeleport(playerId);
+
+                // ДОБАВЛЕНО: Восстанавливаем здоровье для ранкед дуэлей
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    if (player.isOnline()) {
+                        plugin.getDuelManager().restorePlayerHealth(player);
+
+                        if (plugin.getConfig().getBoolean("debug", false)) {
+                            plugin.getLogger().info("Восстановлено здоровье после респавна для " + player.getName());
+                        }
+                    }
+                }, 40L); // 40 тиков = 2 секунды задержки
             }
         }
     }

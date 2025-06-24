@@ -125,10 +125,22 @@ public class DuelDeathListener implements Listener {
             pendingRespawns.remove(playerId);
 
             // Проверяем, есть ли сохраненный инвентарь для Ranked дуэлей, и восстанавливаем его НЕМЕДЛЕННО
+// Проверяем, есть ли сохраненный инвентарь для Ranked дуэлей, и восстанавливаем его НЕМЕДЛЕННО
             if (rankedDeathInventories.containsKey(playerId)) {
                 // Моментальное восстановление инвентаря непосредственно в этом событии
                 // без создания дополнительных задержек
                 restoreRankedDuelInventory(player);
+
+                // ДОБАВЛЕНО: Восстанавливаем здоровье для ранкед дуэлей
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    if (player.isOnline()) {
+                        plugin.getDuelManager().restorePlayerHealth(player);
+
+                        if (plugin.getConfig().getBoolean("debug", false)) {
+                            plugin.getLogger().info("Восстановлено здоровье после респавна для " + player.getName());
+                        }
+                    }
+                }, 40L); // 5 тиков = 0.25 секунды задержки
             }
         }
     }

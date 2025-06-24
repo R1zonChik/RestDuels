@@ -23,9 +23,13 @@ public class MenuCloseListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerDamage(EntityDamageEvent event) {
+        // Проверяем, был ли урон отменён
+        if (event.isCancelled()) {
+            return; // Если урон отменён, не закрываем меню
+        }
+
         if (event.getEntity() instanceof Player) {
             Player player = (Player) event.getEntity();
-
             // Если игрок получил урон, закрываем меню
             if (isPvPEvent(event)) {
                 closeMenuIfOpen(player);
@@ -35,9 +39,13 @@ public class MenuCloseListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerAttack(EntityDamageByEntityEvent event) {
+        // Проверяем, был ли урон отменён
+        if (event.isCancelled()) {
+            return; // Если урон отменён, не закрываем меню
+        }
+
         if (event.getDamager() instanceof Player) {
             Player player = (Player) event.getDamager();
-
             // Если игрок нанес урон, закрываем меню
             closeMenuIfOpen(player);
         }
@@ -76,7 +84,6 @@ public class MenuCloseListener implements Listener {
     private void closeMenuIfOpen(Player player) {
         if (player.getOpenInventory() != null) {
             InventoryHolder holder = player.getOpenInventory().getTopInventory().getHolder();
-
             // Проверяем, является ли открытое меню меню дуэлей
             if (holder instanceof DuelMenu ||
                     player.getOpenInventory().getTitle().contains("Дуэли") ||

@@ -66,6 +66,9 @@ public class DuelManager {
     public final Map<UUID, BossBar> playerBossBars = new HashMap<>();
     private final Map<UUID, BukkitTask> searchTasks = new HashMap<>();
     // Добавьте эти поля в класс DuelManager
+    private final Map<UUID, Double> originalPlayerHealth = new HashMap<>(); // Сохраненное здоровье
+    private final Map<UUID, Integer> originalPlayerFood = new HashMap<>(); // Сохраненная сытость (бонус)
+    private final Map<UUID, Float> originalPlayerSaturation = new HashMap<>(); // Сохраненная насыщенность (бонус)
     private final Map<UUID, Long> postDuelBlockTime = new HashMap<>();
     private final long POST_DUEL_BLOCK_DURATION = 10000; // 10 секунд блокировки после дуэли
     private final Set<UUID> playersInEndPhase = new HashSet<>();
@@ -95,6 +98,69 @@ public class DuelManager {
             this.player2Id = player2Id;
             this.type = type;
         }
+    }
+
+    /**
+     * Сохраняет текущее здоровье игрока для ранкед дуэлей
+     * @param player Игрок
+     */
+    private void savePlayerHealth(Player player) {
+        UUID playerId = player.getUniqueId();
+
+        // Сохраняем здоровье
+        originalPlayerHealth.put(playerId, player.getHealth());
+
+        // Бонус: сохраняем еду и насыщенность
+        originalPlayerFood.put(playerId, player.getFoodLevel());
+        originalPlayerSaturation.put(playerId, player.getSaturation());
+
+        if (plugin.getConfig().getBoolean("debug", false)) {
+            plugin.getLogger().info("Сохранено здоровье игрока " + player.getName() + ": " +
+                    player.getHealth() + " HP, " + player.getFoodLevel() + " food");
+        }
+    }
+
+    /**
+     * Восстанавливает сохраненное здоровье игрока после ранкед дуэли
+     * @param player Игрок
+     */
+    public void restorePlayerHealth(Player player) {
+        UUID playerId = player.getUniqueId();
+
+        // Восстанавливаем здоровье
+        if (originalPlayerHealth.containsKey(playerId)) {
+            double savedHealth = originalPlayerHealth.get(playerId);
+            player.setHealth(Math.min(savedHealth, player.getMaxHealth())); // Не больше максимума
+            originalPlayerHealth.remove(playerId);
+
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().info("Восстановлено здоровье игрока " + player.getName() + ": " + savedHealth + " HP");
+            }
+        }
+
+        // Восстанавливаем еду
+        if (originalPlayerFood.containsKey(playerId)) {
+            int savedFood = originalPlayerFood.get(playerId);
+            player.setFoodLevel(savedFood);
+            originalPlayerFood.remove(playerId);
+        }
+
+        // Восстанавливаем насыщенность
+        if (originalPlayerSaturation.containsKey(playerId)) {
+            float savedSaturation = originalPlayerSaturation.get(playerId);
+            player.setSaturation(savedSaturation);
+            originalPlayerSaturation.remove(playerId);
+        }
+    }
+
+    /**
+     * Очищает сохраненные данные здоровья игрока
+     * @param playerId UUID игрока
+     */
+    private void clearSavedPlayerHealth(UUID playerId) {
+        originalPlayerHealth.remove(playerId);
+        originalPlayerFood.remove(playerId);
+        originalPlayerSaturation.remove(playerId);
     }
 
     /**
@@ -1096,8 +1162,8 @@ public class DuelManager {
         }
 
         // Сохраняем текущий инвентарь и локацию
-        savePlayerInventory(player);
-        saveOriginalLocation(player);
+//        savePlayerInventory(player);
+//        saveOriginalLocation(player);
 
         // Инициализируем список, если его еще нет
         if (!queuedPlayers.containsKey(type)) {
@@ -1802,6 +1868,15 @@ public class DuelManager {
                     " (UUID: " + playerId + "), restoreInventory=" + restoreInventory);
         }
 
+        // ДОБАВЛЕНО: Восстанавливаем полное здоровье ВСЕГДА при возвращении
+        player.setHealth(player.getMaxHealth());
+        player.setFoodLevel(20);
+        player.setSaturation(20.0f);
+
+        if (plugin.getConfig().getBoolean("debug", false)) {
+            plugin.getLogger().info("Восстановлено полное здоровье для " + player.getName());
+        }
+
         // Удаляем из списков
         frozenPlayers.remove(playerId);
         playerArenas.remove(playerId);
@@ -1970,12 +2045,13 @@ public class DuelManager {
         return null;
     }
 
-    // Метод для очистки данных игрока
+    // В метод clearPlayerData добавить:
     private void clearPlayerData(UUID playerId) {
         originalInventories.remove(playerId);
         originalArmor.remove(playerId);
         playerFlightStatus.remove(playerId);
-        // Удаляем другие данные, если они есть
+        // ДОБАВЛЕНО: Очищаем сохраненное здоровье
+        clearSavedPlayerHealth(playerId);
     }
 
     /**
@@ -2328,9 +2404,29 @@ public class DuelManager {
             return;
         }
 
-        // Сохраняем исходные локации ОБОИХ игроков
+        // ИЗМЕНЕНО: Сохраняем инвентарь и локацию ЗДЕСЬ, когда дуэль реально началась
+        savePlayerInventory(player1);
+        savePlayerInventory(player2);
         saveOriginalLocation(player1);
         saveOriginalLocation(player2);
+
+        // ДОБАВЛЕНО: Для ранкед дуэлей сохраняем здоровье
+        if (type == DuelType.RANKED) {
+            savePlayerHealth(player1);
+            savePlayerHealth(player2);
+
+            // Восстанавливаем полное здоровье в начале дуэли
+            player1.setHealth(player1.getMaxHealth());
+            player2.setHealth(player2.getMaxHealth());
+            player1.setFoodLevel(20);
+            player2.setFoodLevel(20);
+            player1.setSaturation(20.0f);
+            player2.setSaturation(20.0f);
+
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().info("Ранкед дуэль: здоровье игроков восстановлено до максимума");
+            }
+        }
 
         // Восстанавливаем арену при входе игроков
         restoreArenaWhenPlayersEnter(arena);
@@ -3191,43 +3287,51 @@ public class DuelManager {
             // В режиме RANKED (без потерь) сразу возвращаем обоих игроков с восстановлением инвентаря
             if (player1 != null && player1.isOnline()) {
                 returnPlayer(player1, true);
+
+                // ДОБАВЛЕНО: Восстанавливаем здоровье для ранкед дуэлей
+                restorePlayerHealth(player1);
+
                 // Специальное сообщение для ранкед-режима
                 if (winner == player1) {
                     player1.sendMessage(ColorUtils.colorize(
                             plugin.getConfig().getString("messages.prefix") +
                                     plugin.getConfig().getString("messages.ranked-duel-win",
-                                            "&aВы победили в ранговой дуэли! Ваш инвентарь восстановлен.")));
+                                            "&aВы победили в ранговой дуэли! Ваш инвентарь и здоровье восстановлены.")));
                 } else if (winner == player2) {
                     player1.sendMessage(ColorUtils.colorize(
                             plugin.getConfig().getString("messages.prefix") +
                                     plugin.getConfig().getString("messages.ranked-duel-lose",
-                                            "&cВы проиграли в ранговой дуэли! Ваш инвентарь восстановлен.")));
+                                            "&cВы проиграли в ранговой дуэли! Ваш инвентарь и здоровье восстановлены.")));
                 } else if (isDraw) {
                     player1.sendMessage(ColorUtils.colorize(
                             plugin.getConfig().getString("messages.prefix") +
                                     plugin.getConfig().getString("messages.ranked-duel-draw",
-                                            "&eРанговая дуэль завершилась вничью! Ваш инвентарь восстановлен.")));
+                                            "&eРанговая дуэль завершилась вничью! Ваш инвентарь и здоровье восстановлены.")));
                 }
             }
 
             if (player2 != null && player2.isOnline()) {
                 returnPlayer(player2, true);
+
+                // ДОБАВЛЕНО: Восстанавливаем здоровье для ранкед дуэлей
+                restorePlayerHealth(player2);
+
                 // Специальное сообщение для ранкед-режима
                 if (winner == player2) {
                     player2.sendMessage(ColorUtils.colorize(
                             plugin.getConfig().getString("messages.prefix") +
                                     plugin.getConfig().getString("messages.ranked-duel-win",
-                                            "&aВы победили в ранговой дуэли! Ваш инвентарь восстановлен.")));
+                                            "&aВы победили в ранговой дуэли! Ваш инвентарь и здоровье восстановлены.")));
                 } else if (winner == player1) {
                     player2.sendMessage(ColorUtils.colorize(
                             plugin.getConfig().getString("messages.prefix") +
                                     plugin.getConfig().getString("messages.ranked-duel-lose",
-                                            "&cВы проиграли в ранговой дуэли! Ваш инвентарь восстановлен.")));
+                                            "&cВы проиграли в ранговой дуэли! Ваш инвентарь и здоровье восстановлены.")));
                 } else if (isDraw) {
                     player2.sendMessage(ColorUtils.colorize(
                             plugin.getConfig().getString("messages.prefix") +
                                     plugin.getConfig().getString("messages.ranked-duel-draw",
-                                            "&eРанговая дуэль завершилась вничью! Ваш инвентарь восстановлен.")));
+                                            "&eРанговая дуэль завершилась вничью! Ваш инвентарь и здоровье восстановлены.")));
                 }
             }
 
@@ -4735,6 +4839,10 @@ public class DuelManager {
         playerFlightStatus.clear();
         originalInventories.clear();
         originalArmor.clear();
+        // Очищаем сохраненное здоровье
+        originalPlayerHealth.clear();
+        originalPlayerFood.clear();
+        originalPlayerSaturation.clear();
 
         // ДОБАВЛЕНО: Попытка очистить CommandBlocker
         try {
@@ -4850,6 +4958,10 @@ public class DuelManager {
         playerFlightStatus.clear();
         originalInventories.clear();
         originalArmor.clear();
+        // Очищаем сохраненное здоровье
+        originalPlayerHealth.clear();
+        originalPlayerFood.clear();
+        originalPlayerSaturation.clear();
 
         // Очищаем очереди
         for (DuelType type : DuelType.values()) {

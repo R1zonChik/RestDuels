@@ -129,7 +129,7 @@ public class DuelRestrictionListener implements Listener {
     }
 
     /**
-     * Блокирует использование бутылок опыта через правый клик
+     * Блокирует использование предметов ТОЛЬКО во время подготовки + всегда блокирует бутылки опыта
      */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPlayerInteract(PlayerInteractEvent event) {
@@ -141,20 +141,31 @@ public class DuelRestrictionListener implements Listener {
         ItemStack item = event.getItem();
         if (item == null) return;
 
-        // Блокируем использование бутылочек опыта
+        // ВСЕГДА блокируем бутылочки опыта в мире дуэлей
         if (blockExpBottles && item.getType() == Material.EXPERIENCE_BOTTLE &&
                 (event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK)) {
             event.setCancelled(true);
-            event.getPlayer().updateInventory(); // Принудительно обновляем инвентарь
+            event.getPlayer().updateInventory();
             player.sendMessage(ColorUtils.colorize(
                     plugin.getConfig().getString("messages.prefix") +
                             "&cИспользование бутылочек опыта запрещено в мире дуэлей!"));
             return;
         }
 
-        // Проверка, является ли используемый предмет запрещенным
+        // ТОЛЬКО во время подготовки блокируем ВСЕ взаимодействия
+        if (isInPreparation(player)) {
+            if (event.getAction() == Action.RIGHT_CLICK_AIR || event.getAction() == Action.RIGHT_CLICK_BLOCK) {
+                event.setCancelled(true);
+                player.updateInventory();
+                player.sendMessage(ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") +
+                                "&cИспользование предметов запрещено во время подготовки к дуэли!"));
+                return;
+            }
+        }
+
+        // Остальные ограничения из конфига (работают всегда в мире дуэлей)
         if (blockedItems.contains(item.getType())) {
-            // Блокируем только взаимодействия, связанные с использованием предмета
             if (event.getAction() == Action.RIGHT_CLICK_AIR ||
                     event.getAction() == Action.RIGHT_CLICK_BLOCK) {
                 event.setCancelled(true);
@@ -166,12 +177,11 @@ public class DuelRestrictionListener implements Listener {
     }
 
     /**
-     * Блокирует бросание бутылочек опыта
+     * ВСЕГДА блокирует бросание бутылочек опыта в мире дуэлей
      */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onProjectileLaunch(ProjectileLaunchEvent event) {
         if (!(event.getEntity() instanceof ThrownExpBottle)) return;
-
         if (!(event.getEntity().getShooter() instanceof Player)) return;
 
         Player player = (Player) event.getEntity().getShooter();
@@ -185,7 +195,7 @@ public class DuelRestrictionListener implements Listener {
     }
 
     /**
-     * Блокирует разбивание бутылочек опыта
+     * ВСЕГДА блокирует разбивание бутылочек опыта в мире дуэлей
      */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onExpBottleBreak(ExpBottleEvent event) {
@@ -195,7 +205,7 @@ public class DuelRestrictionListener implements Listener {
 
         if (isInDuelWorld(player) && blockExpBottles) {
             event.setCancelled(true);
-            event.setExperience(0); // На случай, если отмена события не сработает
+            event.setExperience(0);
             player.sendMessage(ColorUtils.colorize(
                     plugin.getConfig().getString("messages.prefix") +
                             "&cИспользование бутылочек опыта запрещено в мире дуэлей!"));
@@ -203,16 +213,26 @@ public class DuelRestrictionListener implements Listener {
     }
 
     /**
-     * Блокирует выбрасывание предметов
+     * Блокирует выбрасывание предметов ТОЛЬКО во время подготовки
      */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onItemDrop(PlayerDropItemEvent event) {
         Player player = event.getPlayer();
 
-        if (isInDuelWorld(player) && blockItemDrop) {
-            // Проверка, является ли выбрасываемый предмет запрещенным
-            Material dropType = event.getItemDrop().getItemStack().getType();
+        if (!isInDuelWorld(player)) return;
 
+        // ТОЛЬКО во время подготовки блокируем выбрасывание
+        if (isInPreparation(player)) {
+            event.setCancelled(true);
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "&cВыбрасывание предметов запрещено во время подготовки к дуэли!"));
+            return;
+        }
+
+        // Остальные ограничения из конфига (работают всегда)
+        if (blockItemDrop) {
+            Material dropType = event.getItemDrop().getItemStack().getType();
             if (blockedItems.contains(dropType)) {
                 event.setCancelled(true);
                 player.sendMessage(ColorUtils.colorize(
@@ -223,7 +243,7 @@ public class DuelRestrictionListener implements Listener {
     }
 
     /**
-     * Блокирует закрытие инвентаря во время дуэли
+     * Блокирует закрытие инвентаря во время дуэли (не подготовки!)
      */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onInventoryClose(InventoryCloseEvent event) {
@@ -232,7 +252,6 @@ public class DuelRestrictionListener implements Listener {
 
         if (isInDuelWorld(player) && isInDuel(player) && blockInventoryClose) {
             if (blockedInventories.contains(event.getInventory().getType())) {
-                // Нельзя отменить закрытие инвентаря, но можно открыть его снова
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
                     player.openInventory(event.getInventory());
                     player.sendMessage(ColorUtils.colorize(
@@ -244,7 +263,7 @@ public class DuelRestrictionListener implements Listener {
     }
 
     /**
-     * Блокирует открытие определенных типов инвентарей
+     * Блокирует открытие определенных типов инвентарей во время дуэли (не подготовки!)
      */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onInventoryOpen(InventoryOpenEvent event) {
@@ -275,7 +294,7 @@ public class DuelRestrictionListener implements Listener {
     }
 
     /**
-     * Блокирует употребление определенных предметов
+     * Блокирует употребление предметов ТОЛЬКО во время подготовки
      */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onItemConsume(PlayerItemConsumeEvent event) {
@@ -283,6 +302,16 @@ public class DuelRestrictionListener implements Listener {
 
         if (!isInDuelWorld(player)) return;
 
+        // ТОЛЬКО во время подготовки блокируем употребление
+        if (isInPreparation(player)) {
+            event.setCancelled(true);
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "&cУпотребление предметов запрещено во время подготовки к дуэли!"));
+            return;
+        }
+
+        // Остальные ограничения из конфига (работают всегда)
         Material consumeType = event.getItem().getType();
         if (blockedConsumeItems.contains(consumeType)) {
             event.setCancelled(true);

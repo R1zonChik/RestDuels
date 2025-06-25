@@ -23,6 +23,7 @@ import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.potion.PotionEffect;
 import org.bukkit.scheduler.BukkitTask;
 import ru.refontstudio.restduels.RestDuels;
 import ru.refontstudio.restduels.listeners.CommandBlocker;
@@ -2547,6 +2548,22 @@ public class DuelManager {
     }
 
     /**
+     * Очищает все активные эффекты зелий у игрока
+     * @param player Игрок для очистки эффектов
+     */
+    private void clearEffects(Player player) {
+        if (player == null || !player.isOnline()) return;
+
+        for (PotionEffect effect : player.getActivePotionEffects()) {
+            player.removePotionEffect(effect.getType());
+        }
+
+        if (plugin.getConfig().getBoolean("debug", false)) {
+            plugin.getLogger().info("Очищены все эффекты у игрока " + player.getName());
+        }
+    }
+
+    /**
      * Завершает дуэль с указанием победителя
      * @param duel Дуэль
      * @param winnerId UUID победителя
@@ -2559,6 +2576,10 @@ public class DuelManager {
         // Получаем игроков (если они онлайн)
         Player player1 = Bukkit.getPlayer(player1Id);
         Player player2 = Bukkit.getPlayer(player2Id);
+
+        // ДОБАВЛЕНО: Очищаем все эффекты у игроков при окончании дуэли
+        clearEffects(player1);
+        clearEffects(player2);
 
         // Определяем победителя и проигравшего
         UUID loserId = winnerId.equals(player1Id) ? player2Id : player1Id;
@@ -2682,6 +2703,10 @@ public class DuelManager {
         // Получаем игроков (если они онлайн)
         final Player player1 = Bukkit.getPlayer(player1Id);
         final Player player2 = Bukkit.getPlayer(player2Id);
+
+        // ДОБАВЛЕНО: Очищаем все эффекты у игроков при ничьей
+        clearEffects(player1);
+        clearEffects(player2);
 
         // Отправляем сообщение о ничьей
         String drawMessage = ColorUtils.colorize(
@@ -3147,6 +3172,10 @@ public class DuelManager {
         // Обрабатываем игроков и статистику
         Player player1 = Bukkit.getPlayer(duel.getPlayer1Id());
         Player player2 = Bukkit.getPlayer(duel.getPlayer2Id());
+
+        // ДОБАВЛЕНО: Очищаем все эффекты у игроков при завершении дуэли
+        clearEffects(player1);
+        clearEffects(player2);
 
         // Сразу удаляем дуэль из списка активных для обоих игроков
         playerDuels.remove(duel.getPlayer1Id());
@@ -4573,6 +4602,10 @@ public class DuelManager {
             // Получаем игроков
             Player player1 = Bukkit.getPlayer(duel.getPlayer1Id());
             Player player2 = Bukkit.getPlayer(duel.getPlayer2Id());
+
+            // ДОБАВЛЕНО: Очищаем эффекты при принудительном завершении дуэлей
+            clearEffects(player1);
+            clearEffects(player2);
 
             // Освобождаем арену
             if (duel.getArena() != null) {

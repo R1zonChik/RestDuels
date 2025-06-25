@@ -33,14 +33,13 @@ public class DuelDeathListener implements Listener {
         this.plugin = plugin;
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST)
+    @EventHandler(priority = EventPriority.MONITOR) // ИЗМЕНЕНО: с HIGHEST на MONITOR
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
         UUID playerId = player.getUniqueId();
 
         // Проверяем, находится ли игрок в состоянии дуэли
         if (!plugin.getDuelManager().isPlayerInDuel(playerId)) {
-            // Не в дуэли? Тогда игнорируем — пусть работают другие плагины (например, спавн)
             return;
         }
 
@@ -52,34 +51,82 @@ public class DuelDeathListener implements Listener {
 
         // Получаем дуэль, в которой участвует игрок
         Duel duel = plugin.getDuelManager().getPlayerDuel(playerId);
+        if (duel == null) return;
 
-        // Если это Ranked дуэль, сохраняем инвентарь для моментального восстановления
-        if (duel != null && duel.getType() == DuelType.RANKED) {
-            // Моментально сохраняем текущий инвентарь перед любыми изменениями
+        // Определяем победителя
+        UUID winnerId = duel.getPlayer1Id().equals(playerId) ? duel.getPlayer2Id() : duel.getPlayer1Id();
+        Player winner = Bukkit.getPlayer(winnerId);
+
+        if (duel.getType() == DuelType.RANKED) {
+            // В Ranked дуэли предметы НЕ выпадают
             savePlayerInventoryForRankedDuel(player);
 
-            // Отменяем выпадение предметов
             event.setKeepInventory(true);
             event.getDrops().clear();
             event.setKeepLevel(true);
             event.setDroppedExp(0);
 
-            // Отправляем сообщение игроку
             player.sendMessage(ColorUtils.colorize(
                     plugin.getConfig().getString("messages.prefix") +
-                            "&cВы проиграли дуэль! Ваш инвентарь будет восстановлен после возрождения."));
+                            "&cВы проиграли ранговую дуэль! Ваш инвентарь будет восстановлен после возрождения."));
 
-            // Получаем противника
-            UUID opponentId = duel.getPlayer1Id().equals(playerId) ? duel.getPlayer2Id() : duel.getPlayer1Id();
-            Player opponent = Bukkit.getPlayer(opponentId);
-
-            // Оповещаем победителя
-            if (opponent != null && opponent.isOnline()) {
-                opponent.sendMessage(ColorUtils.colorize(
+            if (winner != null && winner.isOnline()) {
+                winner.sendMessage(ColorUtils.colorize(
                         plugin.getConfig().getString("messages.prefix") +
-                                "&aВы победили в дуэли без потерь! Противник сохранит свой инвентарь."));
+                                "&aВы победили в ранговой дуэли! Противник сохранит свой инвентарь."));
+            }
+
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().info("Ранкед дуэль: предметы сохранены при смерти игрока " + player.getName());
+            }
+        } else if (duel.getType() == DuelType.CLASSIC || duel.getType() == DuelType.NORMAL) {
+            // В Classic и Normal дуэлях предметы ВЫПАДАЮТ
+            event.setKeepInventory(false);
+            event.setKeepLevel(false);
+
+            // ДОБАВЛЕНО: Принудительно создаем дроп предметов с задержкой
+            final Location deathLocation = player.getLocation().clone();
+            final ItemStack[] inventory = player.getInventory().getContents().clone();
+            final ItemStack[] armor = player.getInventory().getArmorContents().clone();
+
+            // Создаем дроп через 1 тик, чтобы обойти другие плагины
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                // Дропаем основной инвентарь
+                for (ItemStack item : inventory) {
+                    if (item != null && item.getType() != org.bukkit.Material.AIR) {
+                        deathLocation.getWorld().dropItemNaturally(deathLocation, item);
+                    }
+                }
+
+                // Дропаем броню
+                for (ItemStack item : armor) {
+                    if (item != null && item.getType() != org.bukkit.Material.AIR) {
+                        deathLocation.getWorld().dropItemNaturally(deathLocation, item);
+                    }
+                }
+
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().info("Принудительно создан дроп предметов для игрока " + player.getName());
+                }
+            }, 1L);
+
+            player.sendMessage(ColorUtils.colorize(
+                    plugin.getConfig().getString("messages.prefix") +
+                            "&cВы проиграли дуэль! Ваши предметы выпали на арене."));
+
+            if (winner != null && winner.isOnline()) {
+                winner.sendMessage(ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") +
+                                "&aВы победили в дуэли! Можете собрать предметы противника."));
+            }
+
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().info("Классик дуэль: предметы выпали при смерти игрока " + player.getName());
             }
         }
+
+        // Завершаем дуэль
+        plugin.getDuelManager().endDuel(duel, winnerId);
 
         // Сохраняем исходную локацию для будущего респавна
         Location originalLocation = plugin.getDuelManager().getOriginalLocation(playerId);
@@ -125,7 +172,6 @@ public class DuelDeathListener implements Listener {
             pendingRespawns.remove(playerId);
 
             // Проверяем, есть ли сохраненный инвентарь для Ranked дуэлей, и восстанавливаем его НЕМЕДЛЕННО
-// Проверяем, есть ли сохраненный инвентарь для Ranked дуэлей, и восстанавливаем его НЕМЕДЛЕННО
             if (rankedDeathInventories.containsKey(playerId)) {
                 // Моментальное восстановление инвентаря непосредственно в этом событии
                 // без создания дополнительных задержек
@@ -140,7 +186,7 @@ public class DuelDeathListener implements Listener {
                             plugin.getLogger().info("Восстановлено здоровье после респавна для " + player.getName());
                         }
                     }
-                }, 40L); // 5 тиков = 0.25 секунды задержки
+                }, 40L); // 2 секунды задержки
             }
         }
     }

@@ -56,6 +56,7 @@ public class DuelManager {
     private final Map<UUID, ItemStack[]> originalInventories = new HashMap<>(); // Инвентарь до начала дуэли
     private final Map<UUID, ItemStack[]> originalArmor = new HashMap<>(); // Броня до начала дуэли
     private final Map<UUID, BukkitTask> flightCheckTasks = new HashMap<>();
+    private final Set<UUID> duelsBeingEnded = Collections.newSetFromMap(new ConcurrentHashMap<>());
     private Set<UUID> countdownPlayers = new HashSet<>();
     private final Map<UUID, Duel> playerDuels = new HashMap<>();
     private final Set<UUID> playersMarkedForTeleport = new HashSet<>();
@@ -2563,131 +2564,171 @@ public class DuelManager {
         }
     }
 
+
+
     /**
      * Завершает дуэль с указанием победителя
      * @param duel Дуэль
      * @param winnerId UUID победителя
      */
     public void endDuel(Duel duel, UUID winnerId) {
-        // Получаем ID игроков
-        UUID player1Id = duel.getPlayer1Id();
-        UUID player2Id = duel.getPlayer2Id();
+        UUID duelId = duel.getPlayer1Id(); // Используем как ID дуэли
 
-        // Получаем игроков (если они онлайн)
-        Player player1 = Bukkit.getPlayer(player1Id);
-        Player player2 = Bukkit.getPlayer(player2Id);
-
-        // ДОБАВЛЕНО: Очищаем все эффекты у игроков при окончании дуэли
-        clearEffects(player1);
-        clearEffects(player2);
-
-        // Определяем победителя и проигравшего
-        UUID loserId = winnerId.equals(player1Id) ? player2Id : player1Id;
-        Player winner = winnerId.equals(player1Id) ? player1 : player2;
-        Player loser = winnerId.equals(player1Id) ? player2 : player1;
-
-        // Обновляем статистику
-        plugin.getStatsManager().incrementWins(winnerId);
-        plugin.getStatsManager().incrementDeaths(loserId);
-
-        // Отправляем сообщение о результате дуэли
-        if (winner != null && winner.isOnline()) {
-            String winMessage = plugin.getConfig().getString("messages.duel-win");
-            if (winMessage == null) {
-                winMessage = "&aПоздравляем! Вы победили в дуэли!";
+        // ЗАЩИТА ОТ ДВОЙНОГО ЗАВЕРШЕНИЯ
+        if (duelsBeingEnded.contains(duelId)) {
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().warning("ПРЕДОТВРАЩЕНО двойное завершение дуэли для " + duelId);
             }
-            winner.sendMessage(ColorUtils.colorize(
-                    plugin.getConfig().getString("messages.prefix") + winMessage));
-            winner.playSound(winner.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
-            plugin.getTitleManager().sendTitle(winner, "duel-win");
+            return; // Дуэль уже завершается, выходим
         }
 
-        if (loser != null && loser.isOnline()) {
-            String loseMessage = plugin.getConfig().getString("messages.duel-lose");
-            if (loseMessage == null) {
-                loseMessage = "&cВы проиграли в дуэли!";
-            }
-            loser.sendMessage(ColorUtils.colorize(
-                    plugin.getConfig().getString("messages.prefix") + loseMessage));
-            loser.playSound(loser.getLocation(), Sound.ENTITY_WITHER_DEATH, 1.0f, 1.0f);
-            plugin.getTitleManager().sendTitle(loser, "duel-lose");
-        }
+        // Помечаем дуэль как завершающуюся
+        duelsBeingEnded.add(duelId);
 
-        // ДОБАВЛЕНО: Удаляем BossBar
-        if (playerBossBars.containsKey(player1Id)) {
-            BossBar bossBar = playerBossBars.get(player1Id);
-            bossBar.removeAll();
-            playerBossBars.remove(player1Id);
-            playerBossBars.remove(player2Id);
-        }
+        try {
+            // Получаем ID игроков
+            UUID player1Id = duel.getPlayer1Id();
+            UUID player2Id = duel.getPlayer2Id();
 
-        // Отменяем таймер дуэли
-        if (duel.getTimerTask() != null) {
-            duel.getTimerTask().cancel();
-        }
-
-        // Удаляем дуэль из списка активных дуэлей
-        playerDuels.remove(player1Id);
-        playerDuels.remove(player2Id);
-
-        // Освобождаем арену
-        occupiedArenas.remove(duel.getArena().getId());
-
-        // Проверяем очередь на арену
-        checkArenaQueue();
-
-        // ИЗМЕНЕНО: Даем время на сбор предметов в классических дуэлях
-        if (duel.getType() == DuelType.NORMAL || duel.getType() == DuelType.CLASSIC) {
-            // Проигравшего возвращаем сразу
-            if (loser != null && loser.isOnline()) {
-                // Для CLASSIC не используем отложенный возврат, а сразу очищаем инвентарь
-                returnPlayer(loser, false);
-                // НЕ вызываем scheduleDelayedReturn для проигравшего в CLASSIC
+            // ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: дуэль еще активна?
+            if (!playerDuels.containsKey(player1Id) || !playerDuels.containsKey(player2Id)) {
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().warning("ПРЕДОТВРАЩЕНО завершение уже неактивной дуэли");
+                }
+                return;
             }
 
-// Победителю даем время собрать вещи
+            // Получаем игроков (если они онлайн)
+            Player player1 = Bukkit.getPlayer(player1Id);
+            Player player2 = Bukkit.getPlayer(player2Id);
+
+            // ДОБАВЛЕНО: Очищаем все эффекты у игроков при окончании дуэли
+            clearEffects(player1);
+            clearEffects(player2);
+
+            // Определяем победителя и проигравшего
+            UUID loserId = winnerId.equals(player1Id) ? player2Id : player1Id;
+            Player winner = winnerId.equals(player1Id) ? player1 : player2;
+            Player loser = winnerId.equals(player1Id) ? player2 : player1;
+
+            // НЕМЕДЛЕННО удаляем дуэль из активных (защита от повторного вызова)
+            playerDuels.remove(player1Id);
+            playerDuels.remove(player2Id);
+
+            // Отменяем ВСЕ таймеры дуэли
+            if (duel.getTimerTask() != null) {
+                duel.getTimerTask().cancel();
+                duel.setTimerTask(null);
+            }
+            if (duel.getDuelTask() != null) {
+                duel.getDuelTask().cancel();
+                duel.setDuelTask(null);
+            }
+
+            // ДОБАВЛЕНО: Удаляем BossBar
+            if (playerBossBars.containsKey(player1Id)) {
+                BossBar bossBar = playerBossBars.get(player1Id);
+                bossBar.removeAll();
+                playerBossBars.remove(player1Id);
+                playerBossBars.remove(player2Id);
+            }
+
+            // Обновляем статистику
+            plugin.getStatsManager().incrementWins(winnerId);
+            plugin.getStatsManager().incrementDeaths(loserId);
+
+            // Отправляем сообщения о результате дуэли
             if (winner != null && winner.isOnline()) {
-                int collectTime = plugin.getConfig().getInt("duel.resource-collection-time", 60);
+                String winMessage = plugin.getConfig().getString("messages.duel-win");
+                if (winMessage == null) {
+                    winMessage = "&aПоздравляем! Вы победили в дуэли!";
+                }
                 winner.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                plugin.getConfig().getString("messages.winner-collect",
-                                        "&aУ вас есть &c" + collectTime + " секунд &aдля сбора вещей.")));
+                        plugin.getConfig().getString("messages.prefix") + winMessage));
+                winner.playSound(winner.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f);
+                plugin.getTitleManager().sendTitle(winner, "duel-win");
+            }
 
-                // Отправляем кнопку досрочного возврата
-                sendEarlyReturnButton(winner);
+            if (loser != null && loser.isOnline()) {
+                String loseMessage = plugin.getConfig().getString("messages.duel-lose");
+                if (loseMessage == null) {
+                    loseMessage = "&cВы проиграли в дуэли!";
+                }
+                loser.sendMessage(ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") + loseMessage));
+                loser.playSound(loser.getLocation(), Sound.ENTITY_WITHER_DEATH, 1.0f, 1.0f);
+                plugin.getTitleManager().sendTitle(loser, "duel-lose");
+            }
 
-                // Планируем отложенный возврат
-                BukkitTask winnerTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                    if (winner.isOnline() && isInDuelWorld(winner)) {
-                        winner.sendMessage(ColorUtils.colorize(
-                                plugin.getConfig().getString("messages.prefix") +
-                                        "&aВремя сбора ресурсов истекло. Вы были телепортированы на исходную позицию с собранными вещами."));
-                        returnPlayer(winner, false);
-                    }
+            // Освобождаем арену
+            occupiedArenas.remove(duel.getArena().getId());
 
-                    // Восстанавливаем арену
-                    if (duel.getArena() != null) {
-                        plugin.getRestoreManager().restoreArenaAreas(duel.getArena().getId());
-                        forceRestoreArena(duel.getArena().getId());
-                    }
-                }, collectTime * 20L);
+            // Проверяем очередь на арену
+            checkArenaQueue();
 
-                delayedReturnTasks.put(winner.getUniqueId(), winnerTask);
+            // Остальная логика завершения дуэли...
+            if (duel.getType() == DuelType.NORMAL || duel.getType() == DuelType.CLASSIC) {
+                // Логика для классик дуэлей (как было)
+                if (loser != null && loser.isOnline()) {
+                    final Player finalLoser = loser;
+                    Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                        if (finalLoser.isOnline()) {
+                            returnPlayer(finalLoser, false);
+                        }
+                    }, 60L);
+                }
+
+                if (winner != null && winner.isOnline()) {
+                    int collectTime = plugin.getConfig().getInt("duel.resource-collection-time", 60);
+                    winner.sendMessage(ColorUtils.colorize(
+                            plugin.getConfig().getString("messages.prefix") +
+                                    plugin.getConfig().getString("messages.winner-collect",
+                                            "&aУ вас есть &c" + collectTime + " секунд &aдля сбора вещей.")));
+
+                    sendEarlyReturnButton(winner);
+
+                    final Player finalWinner = winner;
+                    BukkitTask winnerTask = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                        if (finalWinner.isOnline() && isInDuelWorld(finalWinner)) {
+                            finalWinner.sendMessage(ColorUtils.colorize(
+                                    plugin.getConfig().getString("messages.prefix") +
+                                            "&aВремя сбора ресурсов истекло. Вы были телепортированы на исходную позицию с собранными вещами."));
+                            returnPlayer(finalWinner, false);
+                        }
+
+                        if (duel.getArena() != null) {
+                            plugin.getRestoreManager().restoreArenaAreas(duel.getArena().getId());
+                            forceRestoreArena(duel.getArena().getId());
+                        }
+                    }, collectTime * 20L);
+
+                    delayedReturnTasks.put(winner.getUniqueId(), winnerTask);
+                } else {
+                    Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                        if (duel.getArena() != null) {
+                            plugin.getRestoreManager().restoreArenaAreas(duel.getArena().getId());
+                            forceRestoreArena(duel.getArena().getId());
+                        }
+                    }, 100L);
+                }
             } else {
-                // Если победитель оффлайн, просто восстанавливаем арену
+                // Для RANKED дуэлей
+                if (player1 != null && player1.isOnline()) {
+                    returnPlayer(player1, true);
+                }
+                if (player2 != null && player2.isOnline()) {
+                    returnPlayer(player2, true);
+                }
+
                 if (duel.getArena() != null) {
                     plugin.getRestoreManager().restoreArenaAreas(duel.getArena().getId());
                     forceRestoreArena(duel.getArena().getId());
                 }
             }
-        } else {
-            // Для других типов дуэлей (RANKED) - сразу телепортируем обоих игроков без задержки
-            if (player1 != null && player1.isOnline()) {
-                returnPlayer(player1, true);
-            }
-            if (player2 != null && player2.isOnline()) {
-                returnPlayer(player2, true);
-            }
+
+        } finally {
+            // ВСЕГДА убираем пометку о завершении дуэли
+            duelsBeingEnded.remove(duelId);
         }
     }
 
@@ -2696,113 +2737,149 @@ public class DuelManager {
      * @param duel Дуэль
      */
     private void endDuelAsDraw(Duel duel) {
-        // Получаем ID игроков
-        final UUID player1Id = duel.getPlayer1Id();
-        final UUID player2Id = duel.getPlayer2Id();
+        UUID duelId = duel.getPlayer1Id(); // Используем как ID дуэли
 
-        // Получаем игроков (если они онлайн)
-        final Player player1 = Bukkit.getPlayer(player1Id);
-        final Player player2 = Bukkit.getPlayer(player2Id);
-
-        // ДОБАВЛЕНО: Очищаем все эффекты у игроков при ничьей
-        clearEffects(player1);
-        clearEffects(player2);
-
-        // Отправляем сообщение о ничьей
-        String drawMessage = ColorUtils.colorize(
-                plugin.getConfig().getString("messages.prefix") +
-                        plugin.getConfig().getString("messages.duel-draw", "&eВремя вышло! Дуэль завершилась ничьей."));
-
-        if (player1 != null && player1.isOnline()) {
-            player1.sendMessage(drawMessage);
-            player1.playSound(player1.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.5f, 0.8f);
-            plugin.getTitleManager().sendTitle(player1, "duel-draw");
+        // ЗАЩИТА ОТ ДВОЙНОГО ЗАВЕРШЕНИЯ
+        if (duelsBeingEnded.contains(duelId)) {
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().warning("ПРЕДОТВРАЩЕНА двойная ничья для дуэли " + duelId);
+            }
+            return;
         }
 
-        if (player2 != null && player2.isOnline()) {
-            player2.sendMessage(drawMessage);
-            player2.playSound(player2.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.5f, 0.8f);
-            plugin.getTitleManager().sendTitle(player2, "duel-draw");
-        }
+        // Помечаем дуэль как завершающуюся
+        duelsBeingEnded.add(duelId);
 
-        // Удаляем BossBar
-        if (playerBossBars.containsKey(player1Id)) {
-            BossBar bossBar = playerBossBars.get(player1Id);
-            bossBar.removeAll();
-            playerBossBars.remove(player1Id);
-            playerBossBars.remove(player2Id);
-        }
+        try {
+            // Получаем ID игроков
+            final UUID player1Id = duel.getPlayer1Id();
+            final UUID player2Id = duel.getPlayer2Id();
 
-        // Отменяем таймер дуэли
-        if (duel.getTimerTask() != null) {
-            duel.getTimerTask().cancel();
-        }
-
-        // Удаляем дуэль из списка активных дуэлей
-        playerDuels.remove(player1Id);
-        playerDuels.remove(player2Id);
-
-        // Получаем арену (сохраняем как final)
-        final Arena arena = duel.getArena();
-
-        // Освобождаем арену
-        if (arena != null) {
-            occupiedArenas.remove(arena.getId());
-        }
-
-        // Проверяем очередь на арену
-        checkArenaQueue();
-
-        // Разное поведение в зависимости от типа дуэли
-        if (duel.getType() == DuelType.RANKED) {
-            // В режиме RANKED (без потерь) сразу возвращаем обоих игроков с восстановлением инвентаря
-            if (player1 != null && player1.isOnline()) {
-                // Мгновенное возвращение игрока и восстановление инвентаря
-                returnPlayer(player1, true);
-
-                // Специальное сообщение для ранкед-режима в случае ничьей
-                player1.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                plugin.getConfig().getString("messages.ranked-duel-draw",
-                                        "&eРанговая дуэль завершилась ничьей! Ваш инвентарь восстановлен.")));
+            // ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: дуэль еще активна?
+            if (!playerDuels.containsKey(player1Id) || !playerDuels.containsKey(player2Id)) {
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().warning("ПРЕДОТВРАЩЕНО завершение уже неактивной дуэли (ничья)");
+                }
+                return;
             }
 
-            if (player2 != null && player2.isOnline()) {
-                // Мгновенное возвращение игрока и восстановление инвентаря
-                returnPlayer(player2, true);
+            // Получаем игроков (если они онлайн)
+            final Player player1 = Bukkit.getPlayer(player1Id);
+            final Player player2 = Bukkit.getPlayer(player2Id);
 
-                // Специальное сообщение для ранкед-режима
-                player2.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                plugin.getConfig().getString("messages.ranked-duel-draw",
-                                        "&aРанговая дуэль завершилась ничьей! Ваш инвентарь восстановлен.")));
+            // ДОБАВЛЕНО: Очищаем все эффекты у игроков при ничьей
+            clearEffects(player1);
+            clearEffects(player2);
+
+            // НЕМЕДЛЕННО удаляем дуэль из активных (защита от повторного вызова)
+            playerDuels.remove(player1Id);
+            playerDuels.remove(player2Id);
+
+            // Отменяем ВСЕ таймеры дуэли
+            if (duel.getTimerTask() != null) {
+                duel.getTimerTask().cancel();
+                duel.setTimerTask(null);
+            }
+            if (duel.getDuelTask() != null) {
+                duel.getDuelTask().cancel();
+                duel.setDuelTask(null);
             }
 
-            // Восстанавливаем арену
-            restoreArenaAfterDuel(duel);
-            return; // Важно добавить return, чтобы не выполнять логику для других типов дуэлей
-        } else {
-            // Для CLASSIC и NORMAL даем время на сбор предметов
-            // При ничьей даем время собрать вещи обоим
-            String delayMessage = ColorUtils.colorize(
+            // Удаляем BossBar
+            if (playerBossBars.containsKey(player1Id)) {
+                BossBar bossBar = playerBossBars.get(player1Id);
+                bossBar.removeAll();
+                playerBossBars.remove(player1Id);
+                playerBossBars.remove(player2Id);
+            }
+
+            // Отправляем сообщение о ничьей
+            String drawMessage = ColorUtils.colorize(
                     plugin.getConfig().getString("messages.prefix") +
-                            plugin.getConfig().getString("messages.delay-collect"));
+                            plugin.getConfig().getString("messages.duel-draw", "&eВремя вышло! Дуэль завершилась ничьей."));
 
-            // Получаем время сбора ресурсов из конфига
-            int collectTime = plugin.getConfig().getInt("duel.resource-collection-time", 60);
-
-            // Создаем задачу для отложенного возврата игроков
-            createDelayedReturnTask(duel, player1Id, player2Id, collectTime);
-
-            // Отправляем сообщения и кнопки
             if (player1 != null && player1.isOnline()) {
-                player1.sendMessage(delayMessage);
-                sendEarlyReturnButton(player1);
+                player1.sendMessage(drawMessage);
+                player1.playSound(player1.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.5f, 0.8f);
+                plugin.getTitleManager().sendTitle(player1, "duel-draw");
             }
 
             if (player2 != null && player2.isOnline()) {
-                player2.sendMessage(delayMessage);
-                sendEarlyReturnButton(player2);
+                player2.sendMessage(drawMessage);
+                player2.playSound(player2.getLocation(), Sound.ENTITY_PLAYER_LEVELUP, 0.5f, 0.8f);
+                plugin.getTitleManager().sendTitle(player2, "duel-draw");
+            }
+
+            // Получаем арену (сохраняем как final)
+            final Arena arena = duel.getArena();
+
+            // Освобождаем арену
+            if (arena != null) {
+                occupiedArenas.remove(arena.getId());
+            }
+
+            // Проверяем очередь на арену
+            checkArenaQueue();
+
+            // Разное поведение в зависимости от типа дуэли
+            if (duel.getType() == DuelType.RANKED) {
+                // В режиме RANKED (без потерь) сразу возвращаем обоих игроков с восстановлением инвентаря
+                if (player1 != null && player1.isOnline()) {
+                    // Мгновенное возвращение игрока и восстановление инвентаря
+                    returnPlayer(player1, true);
+
+                    // Специальное сообщение для ранкед-режима в случае ничьей
+                    player1.sendMessage(ColorUtils.colorize(
+                            plugin.getConfig().getString("messages.prefix") +
+                                    plugin.getConfig().getString("messages.ranked-duel-draw",
+                                            "&eРанговая дуэль завершилась ничьей! Ваш инвентарь восстановлен.")));
+                }
+
+                if (player2 != null && player2.isOnline()) {
+                    // Мгновенное возвращение игрока и восстановление инвентаря
+                    returnPlayer(player2, true);
+
+                    // Специальное сообщение для ранкед-режима
+                    player2.sendMessage(ColorUtils.colorize(
+                            plugin.getConfig().getString("messages.prefix") +
+                                    plugin.getConfig().getString("messages.ranked-duel-draw",
+                                            "&aРанговая дуэль завершилась ничьей! Ваш инвентарь восстановлен.")));
+                }
+
+                // Восстанавливаем арену
+                restoreArenaAfterDuel(duel);
+                return; // Важно добавить return, чтобы не выполнять логику для других типов дуэлей
+            } else {
+                // Для CLASSIC и NORMAL даем время на сбор предметов
+                // При ничьей даем время собрать вещи обоим
+                String delayMessage = ColorUtils.colorize(
+                        plugin.getConfig().getString("messages.prefix") +
+                                plugin.getConfig().getString("messages.delay-collect"));
+
+                // Получаем время сбора ресурсов из конфига
+                int collectTime = plugin.getConfig().getInt("duel.resource-collection-time", 60);
+
+                // Создаем задачу для отложенного возврата игроков
+                createDelayedReturnTask(duel, player1Id, player2Id, collectTime);
+
+                // Отправляем сообщения и кнопки
+                if (player1 != null && player1.isOnline()) {
+                    player1.sendMessage(delayMessage);
+                    sendEarlyReturnButton(player1);
+                }
+
+                if (player2 != null && player2.isOnline()) {
+                    player2.sendMessage(delayMessage);
+                    sendEarlyReturnButton(player2);
+                }
+            }
+
+        } finally {
+            // ВСЕГДА убираем пометку о завершении дуэли
+            duelsBeingEnded.remove(duelId);
+
+            if (plugin.getConfig().getBoolean("debug", false)) {
+                plugin.getLogger().info("Дуэль " + duelId + " завершена как ничья и очищена из duelsBeingEnded");
             }
         }
     }

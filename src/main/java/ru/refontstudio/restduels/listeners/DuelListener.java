@@ -72,17 +72,48 @@ public class DuelListener implements Listener {
             UUID winnerId = duel.getPlayer1Id().equals(playerId) ? duel.getPlayer2Id() : duel.getPlayer1Id();
             Player winner = Bukkit.getPlayer(winnerId);
 
-//            // Отправляем сообщение о победе
-//            if (winner != null && winner.isOnline()) {
-//                winner.sendMessage(ColorUtils.colorize(
-//                        plugin.getConfig().getString("messages.prefix") +
-//                                "&aВы победили! Противник был убит."));
-//            }
+            // ДОБАВЛЕНО: Для CLASSIC и NORMAL дуэлей принудительно возрождаем игрока
+            if (duel.getType() == DuelType.CLASSIC || duel.getType() == DuelType.NORMAL) {
+                // Предметы выпадают естественным путем
+                event.setKeepInventory(false);
+                event.setKeepLevel(false);
 
-            // Для режима "Дуэль без потерь" отменяем выпадение предметов
-            if (duel.getType() == DuelType.RANKED) {
+                // ДОБАВЛЕНО: Принудительно возрождаем игрока через 1 секунду
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    if (player.isDead()) {
+                        // Возрождаем игрока принудительно
+                        player.spigot().respawn();
+
+                        if (plugin.getConfig().getBoolean("debug", false)) {
+                            plugin.getLogger().info("Принудительно возрожден игрок " + player.getName() + " в классик дуэли");
+                        }
+                    }
+                }, 20L); // 1 секунда
+
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().info("Классик дуэль: предметы выпали при смерти игрока " + player.getName());
+                }
+            } else if (duel.getType() == DuelType.RANKED) {
+                // Для RANKED дуэлей предметы НЕ выпадают
                 event.setKeepInventory(true);
                 event.getDrops().clear();
+                event.setKeepLevel(true);
+                event.setDroppedExp(0);
+
+                // ДОБАВЛЕНО: Принудительно возрождаем игрока для ранкед дуэлей тоже
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    if (player.isDead()) {
+                        player.spigot().respawn();
+
+                        if (plugin.getConfig().getBoolean("debug", false)) {
+                            plugin.getLogger().info("Принудительно возрожден игрок " + player.getName() + " в ранкед дуэли");
+                        }
+                    }
+                }, 20L); // 1 секунда
+
+                if (plugin.getConfig().getBoolean("debug", false)) {
+                    plugin.getLogger().info("Ранкед дуэль: предметы сохранены при смерти игрока " + player.getName());
+                }
             }
 
             // Завершаем дуэль с победителем

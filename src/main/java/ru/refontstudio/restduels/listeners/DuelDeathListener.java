@@ -33,13 +33,14 @@ public class DuelDeathListener implements Listener {
         this.plugin = plugin;
     }
 
-    @EventHandler(priority = EventPriority.MONITOR) // ИЗМЕНЕНО: с HIGHEST на MONITOR
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlayerDeath(PlayerDeathEvent event) {
         Player player = event.getEntity();
         UUID playerId = player.getUniqueId();
 
         // Проверяем, находится ли игрок в состоянии дуэли
         if (!plugin.getDuelManager().isPlayerInDuel(playerId)) {
+            // Не в дуэли? Тогда игнорируем — пусть работают другие плагины (например, спавн)
             return;
         }
 
@@ -57,19 +58,24 @@ public class DuelDeathListener implements Listener {
         UUID winnerId = duel.getPlayer1Id().equals(playerId) ? duel.getPlayer2Id() : duel.getPlayer1Id();
         Player winner = Bukkit.getPlayer(winnerId);
 
+        // КЛЮЧЕВАЯ ЛОГИКА: Обработка выпадения предметов в зависимости от типа дуэли
         if (duel.getType() == DuelType.RANKED) {
             // В Ranked дуэли предметы НЕ выпадают
+            // Моментально сохраняем текущий инвентарь перед любыми изменениями
             savePlayerInventoryForRankedDuel(player);
 
+            // Отменяем выпадение предметов
             event.setKeepInventory(true);
             event.getDrops().clear();
             event.setKeepLevel(true);
             event.setDroppedExp(0);
 
+            // Отправляем сообщение игроку
             player.sendMessage(ColorUtils.colorize(
                     plugin.getConfig().getString("messages.prefix") +
                             "&cВы проиграли ранговую дуэль! Ваш инвентарь будет восстановлен после возрождения."));
 
+            // Оповещаем победителя
             if (winner != null && winner.isOnline()) {
                 winner.sendMessage(ColorUtils.colorize(
                         plugin.getConfig().getString("messages.prefix") +
@@ -83,42 +89,7 @@ public class DuelDeathListener implements Listener {
             // В Classic и Normal дуэлях предметы ВЫПАДАЮТ
             event.setKeepInventory(false);
             event.setKeepLevel(false);
-
-            // ДОБАВЛЕНО: Принудительно создаем дроп предметов с задержкой
-            final Location deathLocation = player.getLocation().clone();
-            final ItemStack[] inventory = player.getInventory().getContents().clone();
-            final ItemStack[] armor = player.getInventory().getArmorContents().clone();
-
-            // Создаем дроп через 1 тик, чтобы обойти другие плагины
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                // Дропаем основной инвентарь
-                for (ItemStack item : inventory) {
-                    if (item != null && item.getType() != org.bukkit.Material.AIR) {
-                        deathLocation.getWorld().dropItemNaturally(deathLocation, item);
-                    }
-                }
-
-                // Дропаем броню
-                for (ItemStack item : armor) {
-                    if (item != null && item.getType() != org.bukkit.Material.AIR) {
-                        deathLocation.getWorld().dropItemNaturally(deathLocation, item);
-                    }
-                }
-
-                if (plugin.getConfig().getBoolean("debug", false)) {
-                    plugin.getLogger().info("Принудительно создан дроп предметов для игрока " + player.getName());
-                }
-            }, 1L);
-
-            player.sendMessage(ColorUtils.colorize(
-                    plugin.getConfig().getString("messages.prefix") +
-                            "&cВы проиграли дуэль! Ваши предметы выпали на арене."));
-
-            if (winner != null && winner.isOnline()) {
-                winner.sendMessage(ColorUtils.colorize(
-                        plugin.getConfig().getString("messages.prefix") +
-                                "&aВы победили в дуэли! Можете собрать предметы противника."));
-            }
+            // НЕ очищаем event.getDrops() - пусть предметы выпадают естественным путем!
 
             if (plugin.getConfig().getBoolean("debug", false)) {
                 plugin.getLogger().info("Классик дуэль: предметы выпали при смерти игрока " + player.getName());

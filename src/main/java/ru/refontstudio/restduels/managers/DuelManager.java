@@ -679,8 +679,9 @@ public class DuelManager {
         Player player2 = Bukkit.getPlayer(entry.player2Id);
 
         if (player1 != null && player2 != null && player1.isOnline() && player2.isOnline()) {
-            // Помечаем арену как занятую
-            occupiedArenas.add(freeArena.getId());
+            // ИЗМЕНЕНО: Помечаем арену как занятую через ArenaManager
+            plugin.getArenaManager().occupyArena(freeArena.getId());
+            occupiedArenas.add(freeArena.getId()); // Оставляем для совместимости
 
             // Обновляем время последнего использования арены
             arenaLastUsedTime.put(freeArena.getId(), System.currentTimeMillis());
@@ -701,6 +702,9 @@ public class DuelManager {
             player1.sendMessage(message);
             player2.sendMessage(message);
         } else {
+            // ДОБАВЛЕНО: Если один из игроков оффлайн, освобождаем арену через ArenaManager
+            plugin.getArenaManager().releaseArena(freeArena.getId());
+
             // Если один из игроков оффлайн, возвращаем того, кто онлайн
             if (player1 != null && player1.isOnline()) {
                 returnPlayer(player1, true);
@@ -764,8 +768,8 @@ public class DuelManager {
         for (Arena arena : allArenas) {
             String arenaId = arena.getId();
 
-            // Проверяем, не занята ли арена
-            boolean isOccupied = occupiedArenas.contains(arenaId);
+            // ИЗМЕНЕНО: Используем ArenaManager для проверки занятости
+            boolean isOccupied = !plugin.getArenaManager().isArenaAvailable(arenaId);
 
             // Проверяем, не заблокирована ли арена
             boolean isBlocked = isArenaBlocked(arenaId);
@@ -833,8 +837,8 @@ public class DuelManager {
             // Если после всех проверок список пуст, используем все арены
             preferredArenas = new ArrayList<>(allArenas);
 
-            // Удаляем занятые арены
-            preferredArenas.removeIf(arena -> occupiedArenas.contains(arena.getId()));
+            // ИЗМЕНЕНО: Удаляем занятые арены через ArenaManager
+            preferredArenas.removeIf(arena -> !plugin.getArenaManager().isArenaAvailable(arena.getId()));
 
             // Если все еще пусто, возвращаем null
             if (preferredArenas.isEmpty()) {
@@ -1217,6 +1221,9 @@ public class DuelManager {
                 if (freeArena != null) {
                     // Есть свободная арена, помечаем ее как занятую
                     occupiedArenas.add(freeArena.getId());
+
+                    // ДОБАВЬТЕ ЭТУ СТРОКУ:
+                    plugin.getArenaManager().occupyArena(freeArena.getId());
 
                     // Обновляем время последнего использования арены
                     arenaLastUsedTime.put(freeArena.getId(), System.currentTimeMillis());
@@ -2211,6 +2218,7 @@ public class DuelManager {
                     // Освобождаем арену
                     if (arena != null) {
                         occupiedArenas.remove(arena.getId());
+                        plugin.getArenaManager().releaseArena(arena.getId());
                         plugin.getLogger().info("[DEBUG] Арена " + arena.getId() + " освобождена из-за отмены отсчета");
                     }
 
@@ -2320,6 +2328,7 @@ public class DuelManager {
                         // Освобождаем арену
                         if (arena != null) {
                             occupiedArenas.remove(arena.getId());
+                            plugin.getArenaManager().releaseArena(arena.getId());
                             plugin.getLogger().info("[DEBUG] Арена " + arena.getId() + " освобождена из-за выхода игрока");
                         }
                     }
@@ -2816,6 +2825,7 @@ public class DuelManager {
             // Освобождаем арену
             if (arena != null) {
                 occupiedArenas.remove(arena.getId());
+                plugin.getArenaManager().releaseArena(arena.getId());
             }
 
             // Проверяем очередь на арену
@@ -3244,6 +3254,7 @@ public class DuelManager {
         Arena arena = duel.getArena();
         if (arena != null) {
             occupiedArenas.remove(arena.getId());
+            plugin.getArenaManager().releaseArena(arena.getId());
         }
 
         // Обрабатываем игроков и статистику
@@ -4500,6 +4511,7 @@ public class DuelManager {
                         (player.getWorld().equals(arena.getSpawn1().getWorld()) ||
                                 player.getWorld().equals(arena.getSpawn2().getWorld()))) {
                     occupiedArenas.remove(arena.getId());
+                    plugin.getArenaManager().releaseArena(arena.getId());
                     System.out.println("[DUEL-CANCEL] Освобождена арена: " + arena.getId());
                     break;
                 }

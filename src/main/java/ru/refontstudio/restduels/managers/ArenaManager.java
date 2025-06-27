@@ -9,12 +9,15 @@ import ru.refontstudio.restduels.RestDuels;
 import ru.refontstudio.restduels.models.Arena;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 public class ArenaManager {
     private final RestDuels plugin;
     private final List<Arena> arenas = new ArrayList<>();
+    private final Map<String, Boolean> arenaStatus = new HashMap<>(); // true - занята, false - свободна
     private final Random random = new Random();
 
     public ArenaManager(RestDuels plugin) {
@@ -51,8 +54,105 @@ public class ArenaManager {
         return null;
     }
 
+    /**
+     * Проверяет, свободна ли арена
+     * @param arenaId ID арены
+     * @return true если арена свободна, false если занята
+     */
+    public boolean isArenaAvailable(String arenaId) {
+        return !arenaStatus.getOrDefault(arenaId, false);
+    }
+
+    /**
+     * Помечает арену как занятую
+     * @param arenaId ID арены
+     */
+    public void occupyArena(String arenaId) {
+        synchronized (arenaStatus) {
+            arenaStatus.put(arenaId, true);
+            plugin.getLogger().info("Арена " + arenaId + " помечена как занятая");
+        }
+    }
+
+    /**
+     * Освобождает арену
+     * @param arenaId ID арены
+     */
+    public void releaseArena(String arenaId) {
+        synchronized (arenaStatus) {
+            arenaStatus.put(arenaId, false);
+            plugin.getLogger().info("Арена " + arenaId + " освобождена");
+        }
+    }
+
+    /**
+     * Получить случайную СВОБОДНУЮ арену
+     * @return Свободная арена или null, если все арены заняты
+     */
+    public Arena getRandomAvailableArena() {
+        synchronized (arenaStatus) {
+            List<Arena> availableArenas = new ArrayList<>();
+
+            for (Arena arena : arenas) {
+                if (isArenaAvailable(arena.getId())) {
+                    availableArenas.add(arena);
+                }
+            }
+
+            if (availableArenas.isEmpty()) {
+                plugin.getLogger().warning("Все арены заняты!");
+                return null;
+            }
+
+            Arena selectedArena = availableArenas.get(random.nextInt(availableArenas.size()));
+            // Сразу помечаем как занятую
+            occupyArena(selectedArena.getId());
+            return selectedArena;
+        }
+    }
+
+    /**
+     * Получить конкретную арену, если она свободна
+     * @param arenaId ID арены
+     * @return Арена или null, если она занята или не существует
+     */
+    public Arena getSpecificArenaIfAvailable(String arenaId) {
+        synchronized (arenaStatus) {
+            Arena arena = getArena(arenaId);
+            if (arena != null && isArenaAvailable(arenaId)) {
+                occupyArena(arenaId);
+                return arena;
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Получить количество свободных арен
+     * @return количество свободных арен
+     */
+    public int getAvailableArenaCount() {
+        int count = 0;
+        for (Arena arena : arenas) {
+            if (isArenaAvailable(arena.getId())) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * Старый метод для обратной совместимости
+     * @deprecated Используйте getRandomAvailableArena()
+     */
+    @Deprecated
+    public Arena getRandomArena() {
+        return getRandomAvailableArena();
+    }
+
     private void loadArenas() {
         arenas.clear();
+        arenaStatus.clear(); // Очищаем статусы
 
         ConfigurationSection arenasSection = plugin.getConfig().getConfigurationSection("arenas");
         if (arenasSection == null) {
@@ -100,6 +200,7 @@ public class ArenaManager {
 
             Arena arena = new Arena(key, spawn1, spawn2);
             arenas.add(arena);
+            arenaStatus.put(key, false); // Изначально все арены свободны
             plugin.getLogger().info("Загружена арена: " + key);
         }
 
@@ -118,13 +219,6 @@ public class ArenaManager {
 
     public void reloadArenas() {
         loadArenas();
-    }
-
-    public Arena getRandomArena() {
-        if (arenas.isEmpty()) {
-            return null;
-        }
-        return arenas.get(random.nextInt(arenas.size()));
     }
 
     public List<Arena> getArenas() {
